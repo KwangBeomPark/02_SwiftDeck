@@ -1,10 +1,62 @@
 param(
-    [switch]$Publish
+    [switch]$Publish,
+
+    # Authenticode signing. Import the certificate into your personal
+    # certificate store once, then pass its thumbprint here:
+    #
+    #   .\scripts\build.ps1 -CertificateThumbprint AB12...CD
+    #
+    # Deliberately thumbprint-only: a .pfx path would mean handling its password,
+    # and the store keeps the private key out of the build command line and out
+    # of shell history. Without this the build is unsigned, exactly as before.
+    [string]$CertificateThumbprint,
+
+    [string]$TimestampUrl = "http://timestamp.digicert.com"
 )
 
 # SwiftDeck build, packaging, and optional GitHub Release publishing pipeline.
 # Publishing is opt-in so a local build can never modify GitHub by accident.
 $ErrorActionPreference = "Stop"
+
+function Get-SigningCertificate {
+    param([string]$Thumbprint)
+
+    $normalized = ($Thumbprint -replace '[^0-9A-Fa-f]', '').ToUpperInvariant()
+    if ($normalized.Length -eq 0) {
+        throw "The certificate thumbprint contains no hexadecimal characters."
+    }
+
+    foreach ($store in @("Cert:\CurrentUser\My", "Cert:\LocalMachine\My")) {
+        $match = Get-ChildItem -Path $store -CodeSigningCert -ErrorAction SilentlyContinue |
+            Where-Object { $_.Thumbprint -eq $normalized }
+        if ($match) {
+            return @($match)[0]
+        }
+    }
+
+    throw ("No code-signing certificate with thumbprint $normalized was found in " +
+        "Cert:\CurrentUser\My or Cert:\LocalMachine\My. Import the certificate first, " +
+        "then run: Get-ChildItem Cert:\CurrentUser\My -CodeSigningCert")
+}
+
+function Invoke-ArtifactSigning {
+    param(
+        [string[]]$Paths,
+        $Certificate,
+        [string]$TimestampUrl
+    )
+
+    foreach ($path in $Paths) {
+        # Timestamping is what lets the signature stay valid after the
+        # certificate itself expires, so a failure here is fatal, not a warning.
+        $result = Set-AuthenticodeSignature -FilePath $path -Certificate $Certificate `
+            -HashAlgorithm SHA256 -TimestampServer $TimestampUrl
+        if ($result.Status -ne "Valid") {
+            throw "Signing failed for $path : $($result.Status) - $($result.StatusMessage)"
+        }
+        Write-Host ("  signed: {0}" -f (Split-Path $path -Leaf))
+    }
+}
 
 $repoRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot ".."))
 Push-Location $repoRoot
@@ -36,6 +88,18 @@ try {
     foreach ($requiredPath in @($compilerPath, $baseAhk, $iconPath)) {
         if (-not (Test-Path -LiteralPath $requiredPath)) {
             throw "Required build dependency was not found: $requiredPath"
+        }
+    }
+
+    # Resolved here, with the other dependencies, so an unusable thumbprint stops
+    # the run before any existing release artifact is deleted or rebuilt.
+    $signingCertificate = $null
+    if ($CertificateThumbprint) {
+        $signingCertificate = Get-SigningCertificate -Thumbprint $CertificateThumbprint
+        Write-Host ("Signing certificate: {0}" -f $signingCertificate.Subject)
+        Write-Host ("  expires: {0:yyyy-MM-dd}" -f $signingCertificate.NotAfter)
+        if ($signingCertificate.NotAfter -lt (Get-Date)) {
+            throw "That code-signing certificate expired on $($signingCertificate.NotAfter.ToString('yyyy-MM-dd'))."
         }
     }
 
@@ -73,6 +137,18 @@ try {
         throw "Ahk2Exe compilation failed with exit code $($compile.ExitCode)."
     }
 
+    # Order matters. Signing rewrites the executable, so it has to happen before
+    # the copies are taken and before the SHA-256 goes into the manifest —
+    # otherwise the updater would verify a digest of the unsigned bytes and
+    # reject every download.
+    if ($signingCertificate) {
+        Write-Host "Signing $versionedName.exe..."
+        Invoke-ArtifactSigning -Paths @($releaseExe) -Certificate $signingCertificate -TimestampUrl $TimestampUrl
+    }
+    elseif ($Publish) {
+        Write-Warning "Publishing an UNSIGNED release. SmartScreen will warn users on first run."
+    }
+
     Compress-Archive -LiteralPath $releaseExe -DestinationPath $releaseZip -CompressionLevel Optimal
     Copy-Item -LiteralPath $releaseExe -Destination $compatExe -Force
     Copy-Item -LiteralPath $releaseExe -Destination $localVersionedExe -Force
@@ -98,10 +174,30 @@ try {
         } |
         Remove-Item -Force
 
+    # The manifest advertises one digest for both executables, and the updater
+    # falls back from the versioned name to SwiftDeck.exe. If those two ever
+    # differ the fallback would fail SHA-256 verification, so assert it here
+    # rather than discovering it from a user's failed update.
+    $compatHash = (Get-FileHash -LiteralPath $compatExe -Algorithm SHA256).Hash.ToUpperInvariant()
+    if ($compatHash -ne $releaseHash) {
+        throw "SwiftDeck.exe and $versionedName.exe differ; the manifest digest would only match one of them."
+    }
+
+    $signature = Get-AuthenticodeSignature -LiteralPath $releaseExe
+    $compatSignature = Get-AuthenticodeSignature -LiteralPath $compatExe
+    if ($signature.Status -ne $compatSignature.Status) {
+        throw "Signature state differs between the two executables: $($signature.Status) vs $($compatSignature.Status)."
+    }
+
     Write-Host "Build completed:"
     Get-Item -LiteralPath $releaseExe, $releaseZip, $compatExe, $releaseManifest, $localVersionedExe |
         Select-Object FullName, Length
     Write-Host "SHA256: $releaseHash"
+    if ($signature.Status -eq "Valid") {
+        Write-Host ("Signature: Valid - {0}" -f $signature.SignerCertificate.Subject)
+    } else {
+        Write-Host "Signature: $($signature.Status) (unsigned build)"
+    }
 
     if ($Publish) {
         Write-Host "Publishing GitHub Release v$version..."

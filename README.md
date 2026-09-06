@@ -53,7 +53,24 @@ SwiftDeck checks the latest public GitHub Release after startup at most once eve
 1. Install [AutoHotkey v2](https://www.autohotkey.com/).
 2. Clone this repository.
 3. Customize `src/SwiftDeck.ahk` as needed.
-4. Use the Ahk2Exe tool included with AutoHotkey to package your own `SwiftDeck.exe` into `dist/`.
+4. Run `scripts/build.ps1` to compile, package, and write the update manifest.
+
+To produce a signed build, import your code-signing certificate into your personal
+certificate store and pass its thumbprint:
+
+```powershell
+.\scripts\build.ps1 -CertificateThumbprint <thumbprint>
+```
+
+Signing runs before the SHA-256 is written into `SwiftDeck.update.ini`, so a signed
+build stays verifiable by the updater. Without the parameter the build is unsigned.
+
+Before publishing, exercise the self-update path against the previous release:
+
+```powershell
+.\tests\Test-UpdateWorker.ps1 -OldExe dist\SwiftDeck.v1.3.1.exe -NewExe release\SwiftDeck.v1.3.2.exe -WorkRoot $env:TEMP
+.\tests\Test-UpdateRollback.ps1 -OldExe release\SwiftDeck.v1.3.2.exe -WorkRoot $env:TEMP
+```
 
 ### Repository Layout
 

@@ -53,7 +53,23 @@ SwiftDeck은 시작 후 하루에 최대 한 번 GitHub의 최신 정식 릴리�
 1. [AutoHotkey v2](https://www.autohotkey.com/)를 설치합니다.
 2. 이 저장소를 Clone합니다.
 3. `src/SwiftDeck.ahk` 소스 코드를 필요에 맞게 수정합니다.
-4. AutoHotkey에 포함된 Ahk2Exe 도구를 사용하여 본인만의 `SwiftDeck.exe`를 `dist/`에 패키징합니다.
+4. `scripts/build.ps1`을 실행하면 컴파일·패키징·업데이트 매니페스트 작성이 한 번에 진행됩니다.
+
+서명된 빌드를 만들려면 코드 서명 인증서를 개인 인증서 저장소에 등록한 뒤 지문을 넘깁니다.
+
+```powershell
+.\scripts\build.ps1 -CertificateThumbprint <thumbprint>
+```
+
+서명은 `SwiftDeck.update.ini`에 SHA-256이 기록되기 **전에** 수행되므로, 서명된 빌드도
+업데이터가 그대로 검증할 수 있습니다. 인증서를 넘기지 않으면 서명 없이 빌드됩니다.
+
+릴리스 전에는 이전 버전에서 올라오는 자동 업데이트 경로를 확인하세요.
+
+```powershell
+.\tests\Test-UpdateWorker.ps1 -OldExe dist\SwiftDeck.v1.3.1.exe -NewExe release\SwiftDeck.v1.3.2.exe -WorkRoot $env:TEMP
+.\tests\Test-UpdateRollback.ps1 -OldExe release\SwiftDeck.v1.3.2.exe -WorkRoot $env:TEMP
+```
 
 ### 저장소 구조
 
