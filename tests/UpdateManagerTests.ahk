@@ -1,10 +1,6 @@
 #Requires AutoHotkey v2.0
+#Include _TestHarness.ahk
 #Include ..\src\lib\UpdateManager.ahk
-
-AssertEqual(actual, expected, label) {
-    if (actual != expected)
-        throw Error(label . ": expected '" . expected . "', got '" . actual . "'")
-}
 
 AssertThrows(callback, label) {
     didThrow := false
@@ -97,4 +93,4 @@ try {
         DirDelete(rollbackDir, true)
 }
 
-ExitApp(0)
+TestsPassed("UpdateManager")

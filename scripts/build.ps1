@@ -1,6 +1,10 @@
 param(
     [switch]$Publish,
 
+    # Skips the test gate. For getting an emergency build out when a test is
+    # itself broken — not for ignoring a real failure.
+    [switch]$SkipTests,
+
     # Authenticode signing. Import the certificate into your personal
     # certificate store once, then pass its thumbprint here:
     #
@@ -17,6 +21,71 @@ param(
 # SwiftDeck build, packaging, and optional GitHub Release publishing pipeline.
 # Publishing is opt-in so a local build can never modify GitHub by accident.
 $ErrorActionPreference = "Stop"
+
+# Runs every tests\*Tests.ahk and fails the build if any of them does. Each
+# script exits non-zero on a failed assertion, and a load-time error leaves the
+# process sitting on a modal dialog — which is why there is a timeout rather
+# than an open-ended wait.
+function Invoke-TestSuite {
+    param(
+        [string]$TestsDir,
+        [string]$Interpreter,
+        [int]$TimeoutMs = 120000
+    )
+
+    $scripts = @(Get-ChildItem -LiteralPath $TestsDir -Filter "*Tests.ahk" -File | Sort-Object Name)
+    if ($scripts.Count -eq 0) {
+        throw "No test scripts found in $TestsDir. Expected files named *Tests.ahk."
+    }
+
+    Write-Host "Running $($scripts.Count) test script(s)..."
+    $failed = @()
+    foreach ($script in $scripts) {
+        # Driven through .NET rather than Start-Process for two reasons. Output
+        # has to be redirected at all — AutoHotkey is a GUI-subsystem program
+        # with no console, so the harness writing its result to stdout blocks
+        # forever otherwise, and a failed assertion looks like a hang instead of
+        # naming itself. And Start-Process -PassThru does not reliably surface
+        # ExitCode once output is redirected, which made passing tests read as
+        # failures.
+        $psi = New-Object System.Diagnostics.ProcessStartInfo
+        $psi.FileName = $Interpreter
+        $psi.Arguments = "`"$($script.FullName)`""
+        $psi.WorkingDirectory = $TestsDir
+        $psi.RedirectStandardOutput = $true
+        $psi.RedirectStandardError = $true
+        $psi.UseShellExecute = $false
+        $psi.CreateNoWindow = $true
+
+        $proc = [System.Diagnostics.Process]::Start($psi)
+        # Read asynchronously, or a script that fills the pipe buffer deadlocks.
+        $stdoutTask = $proc.StandardOutput.ReadToEndAsync()
+        $stderrTask = $proc.StandardError.ReadToEndAsync()
+
+        if (-not $proc.WaitForExit($TimeoutMs)) {
+            try { $proc.Kill() } catch { }
+            Write-Host ("  {0,-28} TIMED OUT" -f $script.Name)
+            $failed += "$($script.Name) (timed out; a load error may be showing a dialog)"
+            continue
+        }
+
+        $output = (($stdoutTask.Result + $stderrTask.Result) -replace "`r", "").Trim()
+        if ($proc.ExitCode -ne 0) {
+            Write-Host ("  {0,-28} FAILED" -f $script.Name)
+            foreach ($line in ($output -split "`n")) {
+                if ($line.Trim()) { Write-Host "      $line" }
+            }
+            $detail = if ($output) { $output -replace "`n", " / " } else { "exit $($proc.ExitCode)" }
+            $failed += "$($script.Name): $detail"
+        } else {
+            Write-Host ("  {0,-28} ok" -f $script.Name)
+        }
+    }
+
+    if ($failed.Count -gt 0) {
+        throw "Tests failed, build stopped:`n  - " + ($failed -join "`n  - ")
+    }
+}
 
 function Get-SigningCertificate {
     param([string]$Thumbprint)
@@ -101,6 +170,14 @@ try {
         if ($signingCertificate.NotAfter -lt (Get-Date)) {
             throw "That code-signing certificate expired on $($signingCertificate.NotAfter.ToString('yyyy-MM-dd'))."
         }
+    }
+
+    # Before anything is deleted or built: a failing test should stop the run
+    # while the previous release artifacts are still intact.
+    if ($SkipTests) {
+        Write-Warning "Test gate skipped (-SkipTests)."
+    } else {
+        Invoke-TestSuite -TestsDir (Join-Path $repoRoot "tests") -Interpreter $baseAhk
     }
 
     $releaseDir = Join-Path $repoRoot "release"

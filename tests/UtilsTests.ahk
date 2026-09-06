@@ -1,10 +1,6 @@
 #Requires AutoHotkey v2.0
+#Include _TestHarness.ahk
 #Include ..\src\lib\Utils.ahk
-
-AssertEqual(actual, expected, label) {
-    if (actual != expected)
-        throw Error(label . ": expected '" . expected . "', got '" . actual . "'")
-}
 
 AssertEqual(GetAddFolderHotkey("F1"), "^F1", "Default add-folder hotkey")
 AssertEqual(GetAddFolderHotkey("^F1"), "^+F1", "Ctrl main hotkey")
@@ -236,4 +232,4 @@ oversized := CalculateCenteredWindowPosition(2200, 1200, -1920, -200, 0, 840)
 AssertEqual(oversized.X, -1920, "Oversized window clamps to work-area left")
 AssertEqual(oversized.Y, -200, "Oversized window clamps to work-area top")
 
-ExitApp(0)
+TestsPassed("Utils")
