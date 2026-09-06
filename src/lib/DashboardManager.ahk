@@ -46,7 +46,9 @@ class DashboardManager {
         this.hGui.SetFont("s10 c" . THEME_TEXT . " norm", "Segoe UI")
 
         ; Create Tab Control
-        this.mainTab := this.hGui.Add("Tab3", "x20 y80 w460 h465", ["📁 Folders", "⌨️ Prompts", "✏️ Hotstrings", "🔀 Key Remap", "⚙️ General"])
+        ; Height is driven by the General tab, the tallest panel: it now carries a
+        ; fourth hotkey group. The other tabs simply gain trailing whitespace.
+        this.mainTab := this.hGui.Add("Tab3", "x20 y80 w460 h535", ["📁 Folders", "⌨️ Prompts", "✏️ Hotstrings", "🔀 Key Remap", "⚙️ General"])
 
         this.mainTab.UseTab(1)
         this.folderMgr := FolderManager(this.hGui)
@@ -88,10 +90,23 @@ class DashboardManager {
     }
 
     ShowGui(tabIndex) {
+        this.ReloadTabsFromDisk()
         this.mainTab.Choose(tabIndex)
         this.OnTabChange()
         this.RefreshUpdateIndicator()
         ShowCenteredOnMouse(this.hGui)
+    }
+
+    ; The dashboard is built once and only hidden on close, so its lists would
+    ; otherwise stay on the snapshot taken the first time it opened. Every save
+    ; rewrites the whole section from that snapshot, which would discard anything
+    ; changed in the settings files meanwhile. These four tabs save immediately,
+    ; so there is no unsaved in-memory state to lose by re-reading. General is
+    ; excluded: it holds pending edits behind its own Save & Apply button.
+    ReloadTabsFromDisk() {
+        for manager in [this.folderMgr, this.promptMgr, this.hotstringMgr, this.keyRemapMgr] {
+            try manager.ReloadFromDisk()
+        }
     }
 
     RefreshUpdateIndicator() {

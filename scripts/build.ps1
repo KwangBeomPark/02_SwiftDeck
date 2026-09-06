@@ -44,11 +44,19 @@ try {
     New-Item -ItemType Directory -Path $releaseDir -Force | Out-Null
     New-Item -ItemType Directory -Path $distDir -Force | Out-Null
 
-    $releaseExe = Join-Path $releaseDir "SwiftDeck.exe"
-    $releaseZip = Join-Path $releaseDir "SwiftDeck.zip"
+    # The version-stamped .exe is the asset humans download from the Releases page.
+    # SwiftDeck.exe carries the identical bytes under the fixed name that updaters
+    # in v1.3.1 and earlier require, so auto-update keeps working across this change.
+    $versionedName = "SwiftDeck.v$version"
+    $releaseExe = Join-Path $releaseDir "$versionedName.exe"
+    $releaseZip = Join-Path $releaseDir "$versionedName.zip"
+    $compatExe = Join-Path $releaseDir "SwiftDeck.exe"
     $releaseManifest = Join-Path $releaseDir "SwiftDeck.update.ini"
-    $localVersionedExe = Join-Path $distDir "SwiftDeck.v$version.exe"
-    foreach ($ownedOutput in @($releaseExe, $releaseZip, $releaseManifest, $localVersionedExe)) {
+    $localVersionedExe = Join-Path $distDir "$versionedName.exe"
+    # SwiftDeck.zip was the pre-v1.3.2 archive name and is no longer produced;
+    # clearing it keeps release/ from mixing versions when it is uploaded.
+    $retiredOutputs = @((Join-Path $releaseDir "SwiftDeck.zip"))
+    foreach ($ownedOutput in @($releaseExe, $releaseZip, $compatExe, $releaseManifest, $localVersionedExe) + $retiredOutputs) {
         if (Test-Path -LiteralPath $ownedOutput) {
             Remove-Item -LiteralPath $ownedOutput -Force
         }
@@ -66,6 +74,7 @@ try {
     }
 
     Compress-Archive -LiteralPath $releaseExe -DestinationPath $releaseZip -CompressionLevel Optimal
+    Copy-Item -LiteralPath $releaseExe -Destination $compatExe -Force
     Copy-Item -LiteralPath $releaseExe -Destination $localVersionedExe -Force
 
     $releaseHash = (Get-FileHash -LiteralPath $releaseExe -Algorithm SHA256).Hash.ToUpperInvariant()
@@ -74,13 +83,23 @@ try {
         "[Release]",
         "Version=$version",
         "Asset=SwiftDeck.exe",
+        "AssetVersioned=$versionedName.exe",
         "Sha256=$releaseHash",
         "Size=$releaseSize"
     )
     Set-Content -LiteralPath $releaseManifest -Value $manifestLines -Encoding utf8
 
+    # Drop version-stamped artifacts left behind by earlier builds so the release
+    # folder only ever holds the assets for the version just built.
+    Get-ChildItem -LiteralPath $releaseDir -File |
+        Where-Object {
+            $_.Name -match '^SwiftDeck\.v\d+\.\d+\.\d+\.(exe|zip)$' -and
+            $_.Name -ne "$versionedName.exe" -and $_.Name -ne "$versionedName.zip"
+        } |
+        Remove-Item -Force
+
     Write-Host "Build completed:"
-    Get-Item -LiteralPath $releaseExe, $releaseZip, $releaseManifest, $localVersionedExe |
+    Get-Item -LiteralPath $releaseExe, $releaseZip, $compatExe, $releaseManifest, $localVersionedExe |
         Select-Object FullName, Length
     Write-Host "SHA256: $releaseHash"
 
@@ -107,7 +126,7 @@ try {
             throw "Local main and origin/main must match before publishing."
         }
 
-        & gh release create "v$version" $releaseExe $releaseZip $releaseManifest `
+        & gh release create "v$version" $releaseExe $releaseZip $compatExe $releaseManifest `
             --draft --target main --title "SwiftDeck v$version" --generate-notes
         if ($LASTEXITCODE -ne 0) {
             throw "Could not create the draft GitHub Release."

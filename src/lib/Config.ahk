@@ -50,6 +50,12 @@ ConfigGetSettingsFolder() {
     return g_targetFolder
 }
 
+; Where unexpected errors are recorded so a user can report them without having
+; to reproduce the raw AutoHotkey dialog.
+ConfigGetErrorLogPath() {
+    return ConfigGetSettingsFolder() . "SwiftDeck-error.log"
+}
+
 ConfigGetDefaultText(canonicalName) {
     switch canonicalName {
         case "Folders":
@@ -109,15 +115,61 @@ InitializeConfig(fileName, defaultText) {
     }
 }
 
+; How many dated backup generations to retain alongside the latest .bak.
+ConfigGetBackupGenerationCount() {
+    return 5
+}
+
+; The .bak is refreshed from the live settings on every start. On its own that
+; means corrupted settings plus one restart overwrites the only good copy, so
+; keep the outgoing .bak under a dated name first. One generation per calendar
+; day, so frequent restarts do not churn the history.
+ConfigPreserveBackupGeneration(backupPath) {
+    if !FileExist(backupPath)
+        return
+    SplitPath(backupPath, &fileName, &dirPath)
+    historyPath := dirPath . "\" . fileName . "." . FormatTime(A_Now, "yyyyMMdd")
+    if FileExist(historyPath)
+        return ; today's generation is already captured
+    try {
+        FileCopy(backupPath, historyPath, false)
+        ConfigPruneBackupGenerations(dirPath, fileName)
+    }
+}
+
+ConfigPruneBackupGenerations(dirPath, fileName) {
+    paths := ""
+    loop files dirPath . "\" . fileName . ".*", "F" {
+        if RegExMatch(A_LoopFileName, "\.\d{8}$")
+            paths .= A_LoopFileFullPath . "`n"
+    }
+    if (paths == "")
+        return
+
+    ; The names end in a yyyyMMdd stamp, so a reverse sort puts newest first.
+    kept := 0
+    loop parse, Sort(RTrim(paths, "`n"), "R"), "`n" {
+        kept++
+        if (kept > ConfigGetBackupGenerationCount())
+            try FileDelete(A_LoopField)
+    }
+}
+
 BackupConfigs(showMsg := false) {
     global g_targetFolder
     backupDir := g_targetFolder . "Backups\"
-    ConfigEnsureDir(backupDir)
 
     try {
+        ; Inside the try: creating the backup folder can fail on its own (a file
+        ; already occupying that name, a read-only or full drive), and the caller
+        ; should get the same handled message as a failed copy.
+        ConfigEnsureDir(backupDir)
         for fileDef in ConfigGetManagedFiles() {
-            if (fileDef.RequiredBackup || FileExist(fileDef.Path))
-                FileCopy(fileDef.Path, ConfigGetBackupPath(backupDir, fileDef.Path), true)
+            if (fileDef.RequiredBackup || FileExist(fileDef.Path)) {
+                backupPath := ConfigGetBackupPath(backupDir, fileDef.Path)
+                ConfigPreserveBackupGeneration(backupPath)
+                FileCopy(fileDef.Path, backupPath, true)
+            }
         }
         if (showMsg)
             MsgBox("✅ Settings have been backed up successfully.", "Backup Complete", 262208)
@@ -434,20 +486,52 @@ ConfigReadSections(configName) {
     }
 }
 
-ConfigReadAppSettings() {
-    return {
-        MainHotkey: ConfigReadValue("Settings", "Settings", "MainHotkey", "F1"),
-        PromptModifier: ConfigReadValue("Settings", "Settings", "PromptModifier", "#"),
-        PromptUseNumpad: Integer(ConfigReadValue("Settings", "Settings", "PromptUseNumpad", "1")),
-        EmojiHotkey: ConfigReadValue("Settings", "Settings", "EmojiHotkey", "^#Space"),
-        ExitHotkey: ConfigReadValue("Settings", "Settings", "ExitHotkey", "^#Escape")
+; IniRead hands back whatever text is stored and Integer() throws on anything
+; non-numeric, including an existing-but-empty key. Unguarded, one hand-edited or
+; half-written value would take down every ConfigReadAppSettings() caller — which
+; includes the F1 handler, the prompt menu, and the settings window itself.
+ConfigReadNumber(configName, section, key, defaultValue) {
+    raw := ConfigReadValue(configName, section, key, defaultValue)
+    try {
+        return Integer(raw)
+    } catch {
+        return Integer(defaultValue)
     }
 }
 
-ConfigWriteAppSettings(mainHotkey, promptModifier, promptUseNumpad) {
+; Hotkey defaults in one place: the reader falls back to these per missing key,
+; and startup recovery uses the whole set when the settings file is unreadable.
+ConfigGetFallbackAppSettings() {
+    return {
+        MainHotkey: "F1",
+        PromptModifier: "#",
+        PromptUseNumpad: 1,
+        EmojiHotkey: "^#Space",
+        ExitHotkey: "^#Escape"
+    }
+}
+
+ConfigReadAppSettings() {
+    defaults := ConfigGetFallbackAppSettings()
+    return {
+        MainHotkey: ConfigReadValue("Settings", "Settings", "MainHotkey", defaults.MainHotkey),
+        PromptModifier: ConfigReadValue("Settings", "Settings", "PromptModifier", defaults.PromptModifier),
+        PromptUseNumpad: ConfigReadNumber("Settings", "Settings", "PromptUseNumpad", defaults.PromptUseNumpad),
+        EmojiHotkey: ConfigReadValue("Settings", "Settings", "EmojiHotkey", defaults.EmojiHotkey),
+        ExitHotkey: ConfigReadValue("Settings", "Settings", "ExitHotkey", defaults.ExitHotkey)
+    }
+}
+
+; Emoji and Exit are optional so an older call site that only knows the first
+; three values leaves the stored shortcuts untouched.
+ConfigWriteAppSettings(mainHotkey, promptModifier, promptUseNumpad, emojiHotkey := "", exitHotkey := "") {
     ConfigWriteValue("Settings", "Settings", "MainHotkey", mainHotkey)
     ConfigWriteValue("Settings", "Settings", "PromptModifier", promptModifier)
     ConfigWriteValue("Settings", "Settings", "PromptUseNumpad", promptUseNumpad)
+    if (emojiHotkey != "")
+        ConfigWriteValue("Settings", "Settings", "EmojiHotkey", emojiHotkey)
+    if (exitHotkey != "")
+        ConfigWriteValue("Settings", "Settings", "ExitHotkey", exitHotkey)
 }
 
 ConfigReadFolderItems() {
@@ -513,16 +597,60 @@ ConfigReadPromptItems(groupNum) {
     return items
 }
 
+; Windows caps INI reads at two different places, both measured on Windows 11:
+;   - a whole section reads back intact at 65,000 characters but comes back
+;     COMPLETELY EMPTY at 66,000, which the next save would persist as "the slot
+;     is empty" — deleting every prompt in it
+;   - a single value reads back intact at 32,000 and is silently truncated by
+;     40,000 (the classic 32,767 limit)
+; Both limits sit well below their cliff.
+ConfigGetMaxSectionLength() {
+    return 60000
+}
+
+ConfigGetMaxValueLength() {
+    return 30000
+}
+
+ConfigBuildPromptSectionText(items) {
+    content := ""
+    for item in items
+        content .= item.Title . "=" . StrReplace(item.Msg, "`n", "\n") . "`n"
+    return content
+}
+
+; Returns "" when the slot is safe to write, or a human-readable reason when it
+; is not. Callers must refuse the edit rather than write something the reader
+; cannot get back intact.
+ConfigCheckPromptSlotLimit(items) {
+    for item in items {
+        encodedLength := StrLen(StrReplace(item.Msg, "`n", "\n"))
+        if (encodedLength > ConfigGetMaxValueLength())
+            return "One prompt is " . encodedLength . " characters, over the "
+                . ConfigGetMaxValueLength() . " character limit for a single prompt.`n`n"
+                . "Windows silently cuts a settings value longer than that, so part of "
+                . "the text would be lost. Please shorten it."
+    }
+
+    length := StrLen(ConfigBuildPromptSectionText(items))
+    if (length > ConfigGetMaxSectionLength())
+        return "This slot would hold " . length . " characters, over the "
+            . ConfigGetMaxSectionLength() . " character limit for one slot.`n`n"
+            . "Windows cannot read a settings section that large, and saving it would "
+            . "discard every prompt in this slot. Shorten this prompt or move some to another slot."
+    return ""
+}
+
 ConfigWritePromptData(promptData) {
     loop 10 {
         num := A_Index - 1
-        content := ""
-        if (promptData[num].Length > 0) {
-            for item in promptData[num] {
-                content .= item.Title . "=" . StrReplace(item.Msg, "`n", "\n") . "`n"
-            }
-        }
-        ConfigWriteSection("Prompts", "Numpad" . num, content)
+        items := (promptData[num].Length > 0) ? promptData[num] : []
+        ; Never write something the reader cannot get back: an over-long section
+        ; reads as empty, which the following save persists as deletion.
+        limitWarning := ConfigCheckPromptSlotLimit(items)
+        if (limitWarning != "")
+            throw Error("Prompt slot " . num . ": " . limitWarning)
+        ConfigWriteSection("Prompts", "Numpad" . num, ConfigBuildPromptSectionText(items))
     }
 }
 

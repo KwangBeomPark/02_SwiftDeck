@@ -299,7 +299,24 @@ class PromptManager {
                 return
             }
             if (!IsPlainIniKeySafe(t)) {
-                MsgBox("⚠️ Prompt title cannot contain '=' or line breaks.`nPlease use a simpler title.", "Invalid Prompt Title", 262192)
+                MsgBox("⚠️ " . GetIniKeyRuleMessage(), "Invalid Prompt Title", 262192)
+                return
+            }
+
+            ; Check the resulting slot size before committing it to memory, so an
+            ; over-long prompt is refused instead of being written as a section
+            ; Windows cannot read back (which the next save turns into deletion).
+            candidate := []
+            for existing in this.localData[currNum]
+                candidate.Push(existing)
+            if (isEdit)
+                candidate[editIdx] := { Title: t, Msg: m }
+            else
+                candidate.Push({ Title: t, Msg: m })
+
+            limitWarning := ConfigCheckPromptSlotLimit(candidate)
+            if (limitWarning != "") {
+                MsgBox("⚠️ " . limitWarning, "Prompt Slot Too Large", 262192)
                 return
             }
 
@@ -326,6 +343,14 @@ class PromptManager {
         if (idx > 0 && idx <= this.localData[currNum].Length) {
             this.ShowEditPopup(true, idx)
         }
+    }
+
+    ; Re-reads this tab's settings from disk. The dashboard is created once and
+    ; only hidden on close, and every save rewrites the whole section from
+    ; memory — so without this, edits made to the file meanwhile (App Info's
+    ; Open buttons invite exactly that) are overwritten by the stale snapshot.
+    ReloadFromDisk() {
+        this.localData := ConfigReadPromptData()
     }
 
     RefreshList(targetIdx := 0) {

@@ -35,12 +35,31 @@ manifestText := "[Release]`nVersion=1.3.1`nAsset=SwiftDeck.exe`nSha256="
 manifest := UpdateManager.ParseUpdateManifest(manifestText)
 AssertEqual(manifest.Version, "1.3.1", "Parse manifest version")
 AssertEqual(manifest.AssetName, "SwiftDeck.exe", "Parse canonical asset")
+AssertEqual(manifest.CanonicalAssetName, "SwiftDeck.exe", "Keep canonical asset name")
 AssertEqual(manifest.Size, 1434112, "Parse manifest size")
 AssertThrows(() => UpdateManager.ParseUpdateManifest(StrReplace(manifestText, "SwiftDeck.exe", "Other.exe")), "Reject unexpected asset")
+
+AssertEqual(UpdateManager.GetVersionedAssetName("v1.3.2"), "SwiftDeck.v1.3.2.exe", "Build versioned asset name")
+
+versionedManifestText := "[Release]`nVersion=1.3.2`nAsset=SwiftDeck.exe`nAssetVersioned=SwiftDeck.v1.3.2.exe`nSha256="
+    . "BA7816BF8F01CFEA414140DE5DAE2223B00361A396177A9CB410FF61F20015AD"
+    . "`nSize=1457664`n"
+versionedManifest := UpdateManager.ParseUpdateManifest(versionedManifestText)
+AssertEqual(versionedManifest.AssetName, "SwiftDeck.v1.3.2.exe", "Prefer versioned asset")
+AssertEqual(versionedManifest.CanonicalAssetName, "SwiftDeck.exe", "Retain canonical fallback asset")
+AssertThrows(() => UpdateManager.ParseUpdateManifest(
+    StrReplace(versionedManifestText, "AssetVersioned=SwiftDeck.v1.3.2.exe", "AssetVersioned=SwiftDeck.v9.9.9.exe")),
+    "Reject versioned asset that disagrees with the manifest version")
+AssertThrows(() => UpdateManager.ParseUpdateManifest(
+    StrReplace(versionedManifestText, "AssetVersioned=SwiftDeck.v1.3.2.exe", "AssetVersioned=Other.exe")),
+    "Reject unexpected versioned asset")
 
 AssertEqual(UpdateManager.GetAssetDownloadUrl("1.3.1", "SwiftDeck.exe"),
     "https://github.com/KwangBeomPark/02_SwiftDeck/releases/download/v1.3.1/SwiftDeck.exe",
     "Build canonical asset URL")
+AssertEqual(UpdateManager.GetAssetDownloadUrl("1.3.2", UpdateManager.GetVersionedAssetName("1.3.2")),
+    "https://github.com/KwangBeomPark/02_SwiftDeck/releases/download/v1.3.2/SwiftDeck.v1.3.2.exe",
+    "Build versioned asset URL")
 AssertThrows(() => UpdateManager.GetAssetDownloadUrl("1.3.1", "../SwiftDeck.exe"), "Reject unsafe asset name")
 
 hashTestPath := A_Temp . "\SwiftDeck-UpdateManagerTests-" . A_TickCount . ".tmp"

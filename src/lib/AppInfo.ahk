@@ -136,21 +136,21 @@ ShowAppInformation(parentHwnd := 0) {
     infoGui.SetFont("s9 c" . THEME_TEXT)
     infoGui.Add("Edit", "x35 y303 w345 h22 ReadOnly Background2D2D30 -Border", favoriteConfigPath)
     btnOpenFavFile := infoGui.Add("Button", "x390 y301 w55 h24", "Open")
-    btnOpenFavFile.OnEvent("Click", (*) => RunSafely("notepad.exe `"" . favoriteConfigPath . "`"", "Open Config File"))
+    btnOpenFavFile.OnEvent("Click", (*) => OpenFileInEditor(favoriteConfigPath, "Open Config File"))
 
     infoGui.SetFont("s9 c" . THEME_MUTED)
     infoGui.Add("Text", "x35 y328 w410", "Quick Prompts Config:")
     infoGui.SetFont("s9 c" . THEME_TEXT)
     infoGui.Add("Edit", "x35 y346 w345 h22 ReadOnly Background2D2D30 -Border", promptConfigPath)
     btnOpenPrFile := infoGui.Add("Button", "x390 y344 w55 h24", "Open")
-    btnOpenPrFile.OnEvent("Click", (*) => RunSafely("notepad.exe `"" . promptConfigPath . "`"", "Open Config File"))
+    btnOpenPrFile.OnEvent("Click", (*) => OpenFileInEditor(promptConfigPath, "Open Config File"))
 
     infoGui.SetFont("s9 c" . THEME_MUTED)
     infoGui.Add("Text", "x35 y371 w410", "Hotstrings Config:")
     infoGui.SetFont("s9 c" . THEME_TEXT)
     infoGui.Add("Edit", "x35 y389 w345 h22 ReadOnly Background2D2D30 -Border", hotstringConfigPath)
     btnOpenHsFile := infoGui.Add("Button", "x390 y387 w55 h24", "Open")
-    btnOpenHsFile.OnEvent("Click", (*) => RunSafely("notepad.exe `"" . hotstringConfigPath . "`"", "Open Config File"))
+    btnOpenHsFile.OnEvent("Click", (*) => OpenFileInEditor(hotstringConfigPath, "Open Config File"))
     infoGui.SetFont("s10 c" . THEME_TEXT)
 
     ; 3. Support Developer

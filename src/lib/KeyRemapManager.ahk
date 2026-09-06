@@ -144,6 +144,14 @@ class KeyRemapManager {
         return "[" . friendlyBase . "]"
     }
 
+    ; Re-reads this tab's settings from disk. The dashboard is created once and
+    ; only hidden on close, and every save rewrites the whole section from
+    ; memory — so without this, edits made to the file meanwhile (App Info's
+    ; Open buttons invite exactly that) are overwritten by the stale snapshot.
+    ReloadFromDisk() {
+        this.localData := ConfigReadKeyRemaps()
+    }
+
     RefreshList(targetIdx := 0) {
         listData := []
         for obj in this.localData {

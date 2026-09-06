@@ -1,7 +1,7 @@
 #Requires AutoHotkey v2.0
 #SingleInstance Force
 ;@Ahk2Exe-SetName SwiftDeck
-;@Ahk2Exe-SetVersion 1.3.1.0
+;@Ahk2Exe-SetVersion 1.3.2.0
 ;@Ahk2Exe-SetDescription SwiftDeck - FinOps Automation & HotKey Suite
 ;@Ahk2Exe-SetMainIcon ..\assets\SwiftDeck.ico
 
@@ -10,7 +10,7 @@
 ; =============================================================================
 
 ; [Global] Display version shown in the app UI
-global g_appVersion := "1.3.1"
+global g_appVersion := "1.3.2"
 
 ; [Global] Path configuration (migrate legacy folder name)
 if (DirExist(A_AppData . "\AHK_FolderHotKey") && !DirExist(A_AppData . "\SwiftDeck")) {
@@ -79,6 +79,42 @@ if FileExist(appIconPath) {
 #Include lib\Manual.ahk
 
 ; =============================================================================
+; SECTION: Error Safety Net
+; =============================================================================
+; Without this, any unhandled error shows AutoHotkey's raw dialog — including
+; source file paths — to whoever is running the packaged executable.
+OnError(HandleUnexpectedError)
+
+HandleUnexpectedError(err, mode) {
+    message := "Unknown error"
+    try message := err.Message
+    catch
+        message := String(err)
+
+    logged := false
+    try {
+        detail := FormatTime(, "yyyy-MM-dd HH:mm:ss") . "  [" . mode . "] " . Type(err) . ": " . message
+        try detail .= "`n    at " . err.File . ":" . err.Line
+        try if (err.Extra != "")
+            detail .= "`n    extra: " . err.Extra
+        FileAppend(detail . "`n`n", ConfigGetErrorLogPath(), "UTF-8")
+        logged := true
+    }
+
+    ; On "ExitApp" the process is closing whatever this returns, so do not
+    ; promise the user that SwiftDeck is still running.
+    outcome := (mode == "ExitApp")
+        ? "SwiftDeck ran into an unexpected problem and has to close."
+        : "SwiftDeck ran into an unexpected problem and skipped that action.`n`nSwiftDeck is still running."
+    ; Only promise a log file if the write actually succeeded.
+    trailer := logged
+        ? "`n`nDetails were saved to:`n" . ConfigGetErrorLogPath()
+        : ""
+    MsgBox(outcome . "`n`n" . message . trailer, "SwiftDeck", 262160)
+    return 1 ; handled — end this thread instead of showing the default dialog
+}
+
+; =============================================================================
 ; SECTION: Application Startup
 ; =============================================================================
 if UpdateManager.HandleStartupArguments()
@@ -87,27 +123,37 @@ OnStartup() ; Invoked immediately on script start
 UpdateManager.CompletePendingStartup()
 
 OnStartup() {
-    isFirstRun := ConfigIsFirstRun()
+    warnings := []
 
-    InitializeAllConfigs()
+    isFirstRun := false
+    try isFirstRun := ConfigIsFirstRun()
+
+    RunStartupStep("Settings files", InitializeAllConfigs, warnings)
 
     ; Run config migrations
-    MigrateIniEncoding()
-    MigrateHotstringIni()
+    RunStartupStep("Encoding migration", MigrateIniEncoding, warnings)
+    RunStartupStep("Hotstring migration", MigrateHotstringIni, warnings)
 
-    ; Normalize old hotkey settings such as "WinNumpad"
-    settings := ConfigReadAppSettings()
-    migratedPrompt := MigratePromptModifier(settings.PromptModifier, settings.PromptUseNumpad)
-    settings.PromptModifier := migratedPrompt.Mod
-    settings.PromptUseNumpad := migratedPrompt.UseNumpad
+    ; Normalize old hotkey settings such as "WinNumpad". Falling back to the
+    ; shipped defaults keeps the hotkeys and tray menu usable even if the
+    ; settings file is corrupt or locked.
+    settings := ConfigGetFallbackAppSettings()
+    try {
+        settings := ConfigReadAppSettings()
+        migratedPrompt := MigratePromptModifier(settings.PromptModifier, settings.PromptUseNumpad)
+        settings.PromptModifier := migratedPrompt.Mod
+        settings.PromptUseNumpad := migratedPrompt.UseNumpad
+    } catch Error as err {
+        warnings.Push("Hotkey settings (defaults applied): " . err.Message)
+    }
 
     ; Auto-backup existing config files (.bak)
-    BackupConfigs()
+    RunStartupStep("Settings backup", BackupConfigs, warnings)
 
     ; Load runtime input automation features
-    LoadHotstrings()
-    BuildEmojiMenu()
-    LoadKeyRemaps()
+    RunStartupStep("Hotstrings", LoadHotstrings, warnings)
+    RunStartupStep("Emoji & Symbols menu", BuildEmojiMenu, warnings)
+    RunStartupStep("Key remapping", LoadKeyRemaps, warnings)
     OnExit(CleanupKeyRemaps)
 
     ; Register dynamic hotkey (main menu)
@@ -129,13 +175,16 @@ OnStartup() {
     }
 
     ; Register Emoji Picker, Prompt Menu, and Exit hotkeys
-    try Hotkey(settings.EmojiHotkey, (*) => g_emojiMenu.Show())
+    try Hotkey(settings.EmojiHotkey, ShowEmojiMenu)
     try Hotkey(GetPromptMenuHotkey(), (*) => ShowPromptMenu())  ; Shift+Win+Space → Prompt Popup Menu
     try Hotkey(settings.ExitHotkey, RequestExitApp)
 
-    ; Register dynamic "Add Current Explorer Folder" hotkey (Ctrl + mainHotkey)
+    ; Register dynamic "Add Current Explorer Folder" hotkey (Ctrl + mainHotkey).
+    ; The criterion is evaluated while the keyboard hook waits, so it only reads
+    ; the active window class. Resolving the actual path needs an out-of-process
+    ; COM call into explorer.exe, which happens in the hotkey action instead.
     addFolderHotkey := GetAddFolderHotkey(settings.MainHotkey)
-    HotIf((*) => GetActiveExplorerPath() != "")
+    HotIf((*) => IsExplorerContextActive())
     try {
         Hotkey(addFolderHotkey, (*) => AddCurrentExplorerFolder())
     } catch {
@@ -155,12 +204,25 @@ OnStartup() {
         SetTimer(() => ShowHotkeyCheatSheet(), -1000) ; Show cheat sheet after 1 second
     }
 
-    ; Show startup notification (TrayTip)
+    ; Show startup notification (TrayTip). If a step failed above, say which one
+    ; rather than starting up looking healthy with features quietly missing.
     formattedHK := FormatHotkeyDisplay(settings.MainHotkey)
-    TrayTip("App is running in the background.`nPress [" . formattedHK . "] anytime to open the menu!",
-        "✅ SwiftDeck Ready",
-        "Iconi")
-    SetTimer(() => TrayTip(), -4000) ; Hide notification after 4 seconds
+    if (warnings.Length) {
+        ; A TrayTip is capped in length and is suppressed entirely under Focus
+        ; Assist, so record the detail somewhere the user can still read later.
+        try FileAppend(FormatTime(, "yyyy-MM-dd HH:mm:ss") . "  [startup] "
+            . StrJoin(warnings, "`n             ") . "`n`n", ConfigGetErrorLogPath(), "UTF-8")
+        TrayTip("These parts did not load:`n- " . StrJoin(warnings, "`n- ")
+            . "`n`nEverything else is running. See SwiftDeck-error.log for details.",
+            "⚠️ SwiftDeck started with warnings",
+            "Icon!")
+        SetTimer(() => TrayTip(), -8000)
+    } else {
+        TrayTip("App is running in the background.`nPress [" . formattedHK . "] anytime to open the menu!",
+            "✅ SwiftDeck Ready",
+            "Iconi")
+        SetTimer(() => TrayTip(), -4000) ; Hide notification after 4 seconds
+    }
 }
 
 BindPrompt(num) {
@@ -186,10 +248,10 @@ SetupTrayMenu(settings) {
     foldersLabel := "📂 Open Folders Menu (" . mainHK . ")"
     A_TrayMenu.Add(foldersLabel, (*) => ShowFavoritesMenu())
     A_TrayMenu.Add("⌨️ Quick Prompts Menu (" . promptMenuHK . ")", (*) => ShowPromptMenu())
-    A_TrayMenu.Add("😀 Emoji && Symbols (" . emojiHK . ")", (*) => g_emojiMenu.Show())
+    A_TrayMenu.Add("😀 Emoji && Symbols (" . emojiHK . ")", ShowEmojiMenu)
     A_TrayMenu.Add()
     A_TrayMenu.Add("⚙️ App Settings", (*) => DashboardManager.Show(1))
-    A_TrayMenu.Add("📁 Open Settings Folder", (*) => RunSafely("explorer.exe `"" . ConfigGetSettingsFolder() . "`"", "Open Settings Folder"))
+    A_TrayMenu.Add("📁 Open Settings Folder", (*) => OpenFolder(ConfigGetSettingsFolder()))
     A_TrayMenu.Add("📘 Open App Manual", (*) => OpenAppManual())
     A_TrayMenu.Add("⌨️ Hotkey Cheat Sheet", (*) => ShowHotkeyCheatSheet())
     A_TrayMenu.Add("ℹ️ App Information", (*) => ShowAppInformation())

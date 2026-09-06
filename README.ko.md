@@ -37,15 +37,16 @@
 ### 📥 일반 팀원용 원클릭 다운로드
 
 1. 깃허브 화면 우측의 **[Releases](https://github.com/KwangBeomPark/02_SwiftDeck/releases)** 탭으로 이동합니다.
-2. 최신 릴리즈의 **`SwiftDeck.zip`** 또는 **`SwiftDeck.exe`** 단독 실행 파일을 다운로드합니다.
-
-### 🔄 자동 업데이트
-
-SwiftDeck은 시작 후 하루에 최대 한 번 GitHub의 최신 정식 릴리스를 확인합니다. 새 릴리스가 있으면 **App Settings** 헤더에 `New version vX available`을 표시하고 헤더의 **Update to vX** 버튼에서 바로 검증된 업데이트를 시작할 수 있습니다. **App Information**과 트레이 메뉴의 **Check for Updates**에서는 수동으로 다시 확인할 수 있습니다. 업데이트는 현재 실행 파일과 같은 폴더에 `SwiftDeck.exe`를 내려받고 SHA-256을 확인한 뒤 안전하게 교체하고 재실행합니다. `%AppData%\SwiftDeck`의 저장 설정은 교체하지 않습니다. 소스 실행 모드와 읽기 전용 폴더에서는 수동 업데이트만 제공합니다.
-3. 필요한 경우 압축을 풀고 **`SwiftDeck.exe`**를 더블 클릭합니다.
+2. 최신 릴리즈의 **`SwiftDeck.vX.Y.Z.zip`** 또는 **`SwiftDeck.vX.Y.Z.exe`** 단독 실행 파일을 다운로드합니다. (예: `SwiftDeck.v1.3.2.exe`)
+3. 필요한 경우 압축을 풀고 내려받은 `.exe`를 더블 클릭합니다.
+   각 릴리즈에는 내용이 같은 `SwiftDeck.exe`도 함께 올라갑니다. v1.3.1 이하 버전의 자동 업데이트가 이 이름을 사용합니다.
 4. Windows 우측 하단 시스템 트레이에 검은색 번개 아이콘이 표시되면 바로 사용할 수 있습니다.
 
 아직 릴리즈 파일이 등록되지 않은 경우, AutoHotkey v2로 `src/SwiftDeck.ahk`를 직접 실행하거나 빌드해 주세요.
+
+### 🔄 자동 업데이트
+
+SwiftDeck은 시작 후 하루에 최대 한 번 GitHub의 최신 정식 릴리스를 확인합니다. 새 릴리스가 있으면 **App Settings** 헤더에 `New version vX available`을 표시하고 헤더의 **Update to vX** 버튼에서 바로 검증된 업데이트를 시작할 수 있습니다. **App Information**과 트레이 메뉴의 **Check for Updates**에서는 수동으로 다시 확인할 수 있습니다. 업데이트는 현재 실행 파일과 같은 폴더에 릴리스 실행 파일을 내려받고 `SwiftDeck.update.ini`의 SHA-256을 확인한 뒤 안전하게 교체하고 재실행합니다. 버전이 표기된 자산을 우선 사용하고 없으면 `SwiftDeck.exe`로 대체합니다. 실행 중인 파일의 이름은 그대로 유지되므로, 이름을 바꿔 쓰던 실행 파일은 업데이트 후에도 그 이름을 유지합니다. `%AppData%\SwiftDeck`의 저장 설정은 교체하지 않습니다. 소스 실행 모드와 읽기 전용 폴더에서는 수동 업데이트만 제공합니다.
 
 ### 🛠️ 파워 유저 및 개발자용 커스텀 빌드
 

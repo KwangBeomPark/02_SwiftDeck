@@ -15,18 +15,6 @@ BuildPromptMenu() {
     global g_promptMenu
     g_promptMenu.Delete()
 
-    SafePromptLabel(text, fallback := "Item") {
-        label := StrReplace(text, "`r`n", " ")
-        label := StrReplace(label, "`r", " ")
-        label := StrReplace(label, "`n", " ")
-        label := Trim(label)
-        if (label == "")
-            label := fallback
-        if (StrLen(label) > 60)
-            label := SubStr(label, 1, 60) . "..."
-        return label
-    }
-
     if !ConfigExists("Prompts")
         return
 
@@ -58,29 +46,32 @@ BuildPromptMenu() {
 
     ; Nothing configured anywhere — show a single hint and stop.
     if (!hasAnyItems) {
-        g_promptMenu.Add("(No prompts registered)", (*) => 0)
-        g_promptMenu.Disable("(No prompts registered)")
+        emptyHint := "(No prompts registered)"
+        g_promptMenu.Add(emptyHint, (*) => 0)
+        g_promptMenu.Disable(emptyHint)
         return
     }
 
     ; Second pass: one entry per slot. Populated slots get a submenu; empty slots
     ; are shown disabled so the full hotkey map stays discoverable at a glance.
+    usedGroupLabels := NewMenuLabelSet()
     loop 10 {
         num := A_Index - 1
-        groupLabel := PromptGroupLabel(num)
+        groupLabel := UniqueMenuLabel(PromptGroupLabel(num), usedGroupLabels)
 
         if (promptData.Has(num) && promptData[num].Length > 0) {
             subMenu := Menu()
+            usedItemLabels := NewMenuLabelSet()
             for idx, item in promptData[num] {
                 ; Prefix the tap-order number so the menu matches the tap-to-cycle sequence.
-                itemLabel := idx . ". " . SafePromptLabel(item.Title, "Prompt")
+                itemLabel := UniqueMenuLabel(idx . ". " . SafeMenuLabel(item.Title, "Prompt"), usedItemLabels)
                 boundNum := num
                 boundIdx := idx
                 subMenu.Add(itemLabel, ((n, i, *) => _ExecutePromptFromMenu(n, i)).Bind(boundNum, boundIdx))
             }
             g_promptMenu.Add(groupLabel, subMenu)
         } else if (settings.PromptModifier != "") {
-            emptyLabel := groupLabel . "  —  (empty)"
+            emptyLabel := UniqueMenuLabel(groupLabel . "  —  (empty)", usedGroupLabels)
             g_promptMenu.Add(emptyLabel, (*) => 0)
             g_promptMenu.Disable(emptyLabel)
         }

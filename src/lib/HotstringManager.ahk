@@ -45,7 +45,10 @@ class HotstringManager {
         guiObj.Add("Text", "x" . startX . " y" . startY . " w100", "① Select Group:")
 
         guiObj.SetFont("cBlack")
-        this.cbGroup := guiObj.Add("ComboBox", "x" . (startX + 105) . " y" . (startY - 5) . " w195", [])
+        ; DropDownList, not ComboBox: a name typed into an editable box never
+        ; reaches GroupOrder, so items saved under it were silently discarded on
+        ; write while the UI reported success. Groups are created via "Groups".
+        this.cbGroup := guiObj.Add("DropDownList", "x" . (startX + 105) . " y" . (startY - 5) . " w195", [])
         guiObj.SetFont("c" . THEME_TEXT)
 
         btnManageGrp := guiObj.Add("Button", "x" . (startX + 310) . " y" . (startY - 5) . " w95 h25", "⚙️ Groups")
@@ -326,11 +329,16 @@ class HotstringManager {
     }
 
     OnGroupChange() {
-        groupSection := this.GetCurrentSection()
-        if (groupSection != "" && !this.localData.Has(groupSection)) {
-            this.localData[groupSection] := []
-        }
+        ; The dropdown only offers groups that already exist, so there is
+        ; nothing to create here any more.
         this.RefreshList(0)
+    }
+
+    ; True when the dropdown resolves to a group that really exists. Saving into
+    ; anything else would be discarded by ConfigWriteHotstringData, which only
+    ; writes sections listed in GroupOrder.
+    HasSelectableGroup() {
+        return this.localData.Has(this.GetCurrentSection())
     }
 
     GetCurrentSection() {
@@ -355,6 +363,16 @@ class HotstringManager {
             }
         }
         return ""
+    }
+
+    ; Re-reads this tab's settings from disk. The dashboard is created once and
+    ; only hidden on close, and every save rewrites the whole section from
+    ; memory — so without this, edits made to the file meanwhile (App Info's
+    ; Open buttons invite exactly that) are overwritten by the stale snapshot.
+    ReloadFromDisk() {
+        hotstringData := ConfigReadHotstringData()
+        this.localData := hotstringData.Data
+        this.groupOrder := hotstringData.GroupOrder
     }
 
     RefreshList(targetIdx := 0) {
@@ -450,6 +468,13 @@ class HotstringManager {
             replacementText := Trim(edtVal.Value)
             if (triggerText == "" || replacementText == "") {
                 MsgBox("⚠️ Please enter both an abbreviation and its replacement text.", "Warning", 262192)
+                return
+            }
+
+            ; Refuse rather than report success for a write that would be dropped.
+            if (!this.localData.Has(groupSection)) {
+                MsgBox("⚠️ Select a group first.`n`nUse the ⚙️ Groups button to create one, then add the abbreviation to it.",
+                    "No Group Selected", 262192)
                 return
             }
 

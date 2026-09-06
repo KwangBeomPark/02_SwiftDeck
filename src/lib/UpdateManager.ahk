@@ -57,6 +57,12 @@ class UpdateManager {
             . "/releases/download/v" . version . "/" . assetName
     }
 
+    ; Releases publish a version-stamped copy of the same binary next to the
+    ; fixed-name asset, so a download from the Releases page is identifiable.
+    static GetVersionedAssetName(version) {
+        return "SwiftDeck.v" . this.NormalizeReleaseTag(version) . ".exe"
+    }
+
     static NormalizeReleaseTag(tagName) {
         tagName := Trim(tagName)
         if !RegExMatch(tagName, "^v?([0-9]+\.[0-9]+\.[0-9]+)$", &match)
@@ -96,16 +102,27 @@ class UpdateManager {
             throw Error("Update manifest is missing Size.")
 
         version := this.NormalizeReleaseTag(versionMatch[1])
-        assetName := assetMatch[1]
-        if (assetName != this.BinaryAssetName)
-            throw Error("Unexpected update asset: " . assetName)
+        canonicalAssetName := assetMatch[1]
+        if (canonicalAssetName != this.BinaryAssetName)
+            throw Error("Unexpected update asset: " . canonicalAssetName)
         size := Integer(sizeMatch[1])
         if (size < 100000 || size > 50000000)
             throw Error("Update asset size is outside the allowed range.")
 
+        ; AssetVersioned is optional so manifests published before v1.3.2 stay
+        ; readable. When present it must name exactly the expected versioned
+        ; binary; anything else means the manifest is not trustworthy.
+        assetName := canonicalAssetName
+        if RegExMatch(manifestText, "im)^AssetVersioned[ \t]*=[ \t]*([A-Za-z0-9._-]+)[ \t]*$", &versionedMatch) {
+            if (versionedMatch[1] != this.GetVersionedAssetName(version))
+                throw Error("Unexpected versioned update asset: " . versionedMatch[1])
+            assetName := versionedMatch[1]
+        }
+
         return {
             Version: version,
             AssetName: assetName,
+            CanonicalAssetName: canonicalAssetName,
             Sha256: StrUpper(hashMatch[1]),
             Size: size
         }
@@ -233,6 +250,22 @@ class UpdateManager {
         }
     }
 
+    ; Prefers the version-stamped asset and falls back to the fixed-name copy so a
+    ; release that only carries the canonical binary still installs. Size and
+    ; SHA-256 are verified by the caller either way.
+    static DownloadUpdateAsset(version, manifest, destinationPath) {
+        try {
+            this.DownloadFile(this.GetAssetDownloadUrl(version, manifest.AssetName), destinationPath)
+            return
+        } catch Error as err {
+            if (manifest.AssetName == manifest.CanonicalAssetName)
+                throw err
+        }
+        if FileExist(destinationPath)
+            try FileDelete(destinationPath)
+        this.DownloadFile(this.GetAssetDownloadUrl(version, manifest.CanonicalAssetName), destinationPath)
+    }
+
     static ComputeFileSha256(filePath) {
         if !FileExist(filePath)
             throw Error("Cannot hash a missing file: " . filePath)
@@ -340,7 +373,7 @@ class UpdateManager {
 
             progress.Status.Value := "Downloading SwiftDeck v" . state.LatestVersion . "…"
             progress.Bar.Value := 35
-            this.DownloadFile(this.GetAssetDownloadUrl(state.LatestVersion, manifest.AssetName), pendingPath)
+            this.DownloadUpdateAsset(state.LatestVersion, manifest, pendingPath)
             if (FileGetSize(pendingPath) != manifest.Size)
                 throw Error("Downloaded file size does not match the release manifest.")
 

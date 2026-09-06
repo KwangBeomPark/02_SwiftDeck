@@ -37,15 +37,16 @@ It is designed especially for finance, sales administration, accounting, credit 
 ### 📥 For General Users (1-Click Portable Download)
 
 1. Go to the **[Releases](https://github.com/KwangBeomPark/02_SwiftDeck/releases)** tab on the right side of the GitHub repository.
-2. Download the latest **`SwiftDeck.zip`** or standalone **`SwiftDeck.exe`** file.
-3. Unzip the file if needed, then double-click **`SwiftDeck.exe`**.
+2. Download the latest **`SwiftDeck.vX.Y.Z.zip`** or standalone **`SwiftDeck.vX.Y.Z.exe`** file (for example `SwiftDeck.v1.3.2.exe`).
+3. Unzip the file if needed, then double-click the downloaded `.exe`.
+   Each release also ships an identical `SwiftDeck.exe` under the fixed name, which the built-in updater in v1.3.1 and earlier relies on.
 4. A black lightning bolt icon will appear in the Windows system tray — SwiftDeck is ready to use.
 
 If no release file is available yet, please build or run `src/SwiftDeck.ahk` using AutoHotkey v2.
 
 ### 🔄 Automatic Updates
 
-SwiftDeck checks the latest public GitHub Release after startup at most once every 24 hours. When a newer release is available, **App Settings** shows `New version vX available` in its header and the header's **Update to vX** button starts the verified update directly. **App Information** and the tray menu's **Check for Updates** remain available for manual checks. The updater downloads `SwiftDeck.exe` beside the currently running app, verifies its SHA-256 digest, safely replaces the executable, and restarts SwiftDeck. Saved settings in `%AppData%\SwiftDeck` are not replaced. Source mode and read-only folders remain manual-update only.
+SwiftDeck checks the latest public GitHub Release after startup at most once every 24 hours. When a newer release is available, **App Settings** shows `New version vX available` in its header and the header's **Update to vX** button starts the verified update directly. **App Information** and the tray menu's **Check for Updates** remain available for manual checks. The updater downloads the release binary beside the currently running app, verifies its SHA-256 digest against `SwiftDeck.update.ini`, safely replaces the executable, and restarts SwiftDeck. It prefers the version-stamped asset and falls back to `SwiftDeck.exe`. The running file keeps its own name, so an executable you renamed stays renamed after an update. Saved settings in `%AppData%\SwiftDeck` are not replaced. Source mode and read-only folders remain manual-update only.
 
 ### 🛠️ For Power Users & Developers (Custom Build)
 

@@ -87,6 +87,14 @@ class FolderManager {
         btnDown.OnEvent("Click", (*) => this.MoveItem(1))
     }
 
+    ; Re-reads this tab's settings from disk. The dashboard is created once and
+    ; only hidden on close, and every save rewrites the whole section from
+    ; memory — so without this, edits made to the file meanwhile (App Info's
+    ; Open buttons invite exactly that) are overwritten by the stale snapshot.
+    ReloadFromDisk() {
+        this.orderedItems := FolderManager.ReadFolderItems()
+    }
+
     RefreshList(targetIdx := 0) {
         listData := []
         sepCnt := 0
@@ -154,7 +162,7 @@ class FolderManager {
     AddFolderItem(folderName, folderPath) {
         folderName := Trim(folderName)
         if (!IsPlainIniKeySafe(folderName)) {
-            MsgBox("⚠️ Folder name cannot contain '=' or line breaks.`nPlease use a simpler nickname.", "Invalid Folder Name", 262192)
+            MsgBox("⚠️ " . GetIniKeyRuleMessage(), "Invalid Folder Name", 262192)
             return false
         }
         this.orderedItems.Push({ Name: folderName, Path: folderPath })
@@ -220,7 +228,7 @@ class FolderManager {
                 return
             }
             if (!IsPlainIniKeySafe(n)) {
-                MsgBox("⚠️ Folder name cannot contain '=' or line breaks.`nPlease use a simpler nickname.", "Invalid Folder Name", 262192)
+                MsgBox("⚠️ " . GetIniKeyRuleMessage(), "Invalid Folder Name", 262192)
                 return
             }
 

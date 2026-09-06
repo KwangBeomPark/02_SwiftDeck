@@ -8,6 +8,87 @@ GetFileName(path) {
     return name
 }
 
+; Runs one startup step. A failure degrades that single feature instead of
+; aborting OnStartup(), which would leave the app resident with no tray icon —
+; and therefore no way for the user to quit it.
+RunStartupStep(label, action, warnings) {
+    try {
+        action.Call()
+        return true
+    } catch Error as err {
+        warnings.Push(label . ": " . err.Message)
+        return false
+    }
+}
+
+; AutoHotkey v2 has no built-in join.
+StrJoin(items, separator := ", ") {
+    result := ""
+    for index, item in items
+        result .= (index > 1 ? separator : "") . item
+    return result
+}
+
+; Normalizes arbitrary user or filesystem text into a Win32 menu label.
+; Win32 treats "&" as the keyboard-accelerator prefix, so an unescaped folder
+; named "R&D" renders as "RD" with the D underlined. Line breaks would also break
+; the label, and unbounded text produces an unusable menu.
+SafeMenuLabel(text, fallback := "Item", maxLength := 60) {
+    label := StrReplace(text, "`r`n", " ")
+    label := StrReplace(label, "`r", " ")
+    label := StrReplace(label, "`n", " ")
+    label := StrReplace(label, "`t", " ")
+    label := Trim(label)
+    if (label == "")
+        label := fallback
+    if (StrLen(label) > maxLength) {
+        clipped := SubStr(label, 1, maxLength)
+        ; Never cut between the halves of a surrogate pair. Emoji occupy two
+        ; UTF-16 units and a lone half renders as a replacement box.
+        if (clipped != "") {
+            lastUnit := Ord(SubStr(clipped, -1))
+            if (lastUnit >= 0xD800 && lastUnit <= 0xDBFF)
+                clipped := SubStr(clipped, 1, maxLength - 1)
+        }
+        label := clipped . "..."
+    }
+    ; Escape last so clipping can never split an escaped "&&" pair.
+    return StrReplace(label, "&", "&&")
+}
+
+; Win32 menus key items by their text: adding a label that is already present
+; replaces that item instead of appending one, so two favorites sharing a
+; nickname would silently collapse into a single entry. Callers keep a per-menu
+; Map of labels already used and route every label through this first.
+NewMenuLabelSet() {
+    usedLabels := Map()
+    usedLabels.CaseSense := false ; menu item lookup ignores case
+    return usedLabels
+}
+
+UniqueMenuLabel(label, usedLabels) {
+    candidate := label
+    suffix := 1
+    while usedLabels.Has(candidate) {
+        suffix++
+        candidate := label . " (" . suffix . ")"
+    }
+    usedLabels[candidate] := true
+    return candidate
+}
+
+; Builds a "<program> "<path>"" command line. Run() hands the result to
+; CreateProcess/ShellExecute without a shell, so "&", "|", "<" and ">" inside a
+; path are ordinary characters and quoting is all that is required.
+BuildQuotedCommand(program, path, separator := " ") {
+    ; Deliberately no backslash doubling. CommandLineToArgvW would call for it,
+    ; but explorer.exe parses its own command line and takes the quotes as-is:
+    ; measured on Windows 11, explorer.exe "C:\" opens C:\ while the doubled form
+    ; explorer.exe "C:\\" silently opens Documents instead. Settings folder paths
+    ; always end in a backslash, so doubling broke them outright.
+    return program . separator . '"' . Trim(path) . '"'
+}
+
 OpenFolder(folderPath, Args*) {
     if !folderPath {
         MsgBox "Folder path is not specified.", "Error", 262192
@@ -15,7 +96,8 @@ OpenFolder(folderPath, Args*) {
     }
 
     if FileExist(folderPath) && !DirExist(folderPath) {
-        RunSafely('explorer.exe /select,"' folderPath '"', "Open Folder")
+        ; A file, not a folder: reveal it. "/select," must sit flush against the quote.
+        RunSafely(BuildQuotedCommand("explorer.exe /select,", folderPath, ""), "Open Folder")
         return
     }
 
@@ -24,16 +106,24 @@ OpenFolder(folderPath, Args*) {
         return
     }
 
-    RunSafely('explorer.exe "' folderPath '"', "Open Folder")
+    RunSafely(BuildQuotedCommand("explorer.exe", folderPath), "Open Folder")
+}
+
+; Opens a file in Notepad, but only after confirming it is really there — the
+; editor would otherwise offer to create a new file under the missing name.
+OpenFileInEditor(filePath, title := "Open File") {
+    if (Trim(filePath) == "" || !FileExist(filePath)) {
+        MsgBox("The file could not be found.`n`n" . filePath, title, 262192)
+        return false
+    }
+    return RunSafely(BuildQuotedCommand("notepad.exe", filePath), title)
 }
 
 RunSafely(command, title := "Open Failed") {
-    ; [Security] Block shell injection operators in command strings
-    ; Characters like &, |, >, < can chain destructive OS commands
-    if RegExMatch(command, "[&|><]") {
-        MsgBox("⚠️ Blocked: The path contains potentially unsafe characters (&, |, >, <).`n`n" . command, "Security Warning", 262160)
-        return false
-    }
+    ; No character blocklist here on purpose. Run() goes straight to
+    ; CreateProcess/ShellExecute without a shell, so "&", "|", "<" and ">" inside
+    ; a quoted path cannot chain commands. Screening for them only broke ordinary
+    ; folders such as "Sales & Marketing", which then refused to open at all.
     try {
         Run(command)
         return true
@@ -145,6 +235,18 @@ GetPromptMenuHotkey() {
     return "+#Space"
 }
 
+; Window classes that count as "a folder is on screen" for the Add Current Folder
+; action. Kept as a pure helper so the hotkey criterion stays cheap and testable.
+IsExplorerWindowClass(winClass) {
+    return RegExMatch(winClass, "^(CabinetWClass|ExploreWClass|Progman|WorkerW)$") ? true : false
+}
+
+; The desktop is an Explorer surface but is never listed in Shell.Application.Windows,
+; so its path has to be resolved without COM.
+IsDesktopWindowClass(winClass) {
+    return (winClass == "Progman" || winClass == "WorkerW")
+}
+
 ValidateHotkeyAssignments(mainHotkey, promptModifier, promptUseNumpad, emojiHotkey, exitHotkey, promptMenuHotkey := "") {
     if (promptMenuHotkey == "")
         promptMenuHotkey := GetPromptMenuHotkey()
@@ -201,8 +303,23 @@ ParseIniKeyValuePairs(lineStr) {
     return { Key: "", Val: "" }
 }
 
+; User text that becomes an INI key must not be readable as INI syntax.
+; "=" and line breaks split the entry, and Windows also treats a leading "["
+; as a section header and a leading ";" as a comment — measured: a favorite
+; named "[Draft] Reply" stored second of four silently loses the two entries
+; after it on the next read, permanently once the section is rewritten.
 IsPlainIniKeySafe(text) {
-    return !InStr(text, "=") && !InStr(text, "`r") && !InStr(text, "`n")
+    if (InStr(text, "=") || InStr(text, "`r") || InStr(text, "`n"))
+        return false
+    firstChar := SubStr(Trim(text), 1, 1)
+    return (firstChar != "[") && (firstChar != ";")
+}
+
+; The single place that explains the rule to the user, so every entry point says
+; the same thing.
+GetIniKeyRuleMessage() {
+    return "The name cannot contain '=' or line breaks, and cannot start with '[' or ';'."
+        . "`n`nThose are treated as settings-file syntax and would discard your other entries."
 }
 
 FixIniSpecialChars(k, v) {
