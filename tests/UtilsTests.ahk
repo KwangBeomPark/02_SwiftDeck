@@ -82,6 +82,29 @@ AssertEqual(BuildQuotedCommand("explorer.exe", "C:\Users\me\AppData\Roaming\Swif
 AssertEqual(BuildQuotedCommand("explorer.exe /select,", "C:\a\b.txt", ""),
     'explorer.exe /select,"C:\a\b.txt"', "Reveal-file command takes no separator")
 
+; --- Modifier symbols are not base keys ---
+; BuildKeyString appends the base key and ParseKeyString reads a trailing
+; modifier symbol back as a modifier, so these cannot round-trip.
+AssertEqual(IsModifierSymbolKey("^"), true, "Caret is a modifier symbol")
+AssertEqual(IsModifierSymbolKey("+"), true, "Plus is a modifier symbol")
+AssertEqual(IsModifierSymbolKey("#"), true, "Hash is a modifier symbol")
+AssertEqual(IsModifierSymbolKey("!"), true, "Bang is a modifier symbol")
+AssertEqual(IsModifierSymbolKey("&"), true, "Ampersand is the custom-combo separator")
+AssertEqual(IsModifierSymbolKey("F1"), false, "A function key is a valid base key")
+AssertEqual(IsModifierSymbolKey("a"), false, "A letter is a valid base key")
+
+; Demonstrates the mutation the check prevents.
+AssertEqual(ParseKeyString(BuildKeyString(1, 0, 0, 0, "+")).BaseKey, "",
+    "Ctrl + the plus key loses its base key on a round trip")
+AssertEqual(ParseKeyString(BuildKeyString(1, 0, 0, 0, "F1")).BaseKey, "F1",
+    "A real base key round-trips unchanged")
+
+; --- Menu-safe hotkey display ---
+AssertEqual(FormatHotkeyForMenu("^F1"), "Ctrl+F1", "Ordinary hotkey formats unchanged")
+longHotkey := FormatHotkeyForMenu(StrReplace(Format("{:80}", ""), " ", "z"))
+if (StrLen(longHotkey) > 45)
+    throw Error("A hand-edited hotkey must be clipped for menu use, got " . StrLen(longHotkey))
+
 ; --- Key remap vs the app's own shortcuts ---
 ; AutoHotkey keys a criterion-less hotkey by its string, so a remap on one of
 ; these replaces the app's callback, and removing the remap later turns the

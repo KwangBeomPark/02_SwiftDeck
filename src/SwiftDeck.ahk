@@ -240,10 +240,12 @@ SetupTrayMenu(settings) {
     A_TrayMenu.Delete() ; Remove default AHK tray items (Open, Pause, Exit, etc.)
 
     ; Format hotkey hints so every actionable item advertises its shortcut
-    mainHK := FormatHotkeyDisplay(settings.MainHotkey)
-    emojiHK := FormatHotkeyDisplay(settings.EmojiHotkey)
-    promptMenuHK := FormatHotkeyDisplay(GetPromptMenuHotkey())
-    exitHK := FormatHotkeyDisplay(settings.ExitHotkey)
+    ; Menu-safe: these come from the settings file, so they are escaped and
+    ; clipped. The static parts of each label keep their own "&&".
+    mainHK := FormatHotkeyForMenu(settings.MainHotkey)
+    emojiHK := FormatHotkeyForMenu(settings.EmojiHotkey)
+    promptMenuHK := FormatHotkeyForMenu(GetPromptMenuHotkey())
+    exitHK := FormatHotkeyForMenu(settings.ExitHotkey)
 
     foldersLabel := "📂 Open Folders Menu (" . mainHK . ")"
     A_TrayMenu.Add(foldersLabel, (*) => ShowFavoritesMenu())

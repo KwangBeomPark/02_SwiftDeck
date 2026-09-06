@@ -522,16 +522,54 @@ ConfigReadAppSettings() {
     }
 }
 
+; Rewrites a whole section with some values replaced, leaving every other key in
+; place — [Settings] also carries ManualLanguage, so a blind section rewrite
+; would drop it. Goes through ConfigWriteSection, which keeps a rollback copy.
+ConfigUpdateSectionValues(configName, section, updates) {
+    existing := ConfigReadSection(configName, section, "")
+    lines := []
+    written := Map()
+    written.CaseSense := false
+
+    loop parse, existing, "`n", "`r" {
+        if (Trim(A_LoopField) == "")
+            continue
+        pair := ParseIniKeyValuePairs(A_LoopField)
+        if (pair.Key != "" && updates.Has(pair.Key)) {
+            lines.Push(pair.Key . "=" . updates[pair.Key])
+            written[pair.Key] := true
+        } else {
+            lines.Push(A_LoopField)
+        }
+    }
+
+    ; Keys not already present are appended.
+    for key, value in updates {
+        if !written.Has(key)
+            lines.Push(key . "=" . value)
+    }
+    ConfigWriteSection(configName, section, StrJoin(lines, "`n"))
+}
+
 ; Emoji and Exit are optional so an older call site that only knows the first
 ; three values leaves the stored shortcuts untouched.
+;
+; Written as one section update rather than five separate IniWrite calls: a
+; failure part-way through those would leave a hotkey set that was only ever
+; validated as a whole — for instance a new main hotkey saved while the exit
+; hotkey it was checked against did not get written.
 ConfigWriteAppSettings(mainHotkey, promptModifier, promptUseNumpad, emojiHotkey := "", exitHotkey := "") {
-    ConfigWriteValue("Settings", "Settings", "MainHotkey", mainHotkey)
-    ConfigWriteValue("Settings", "Settings", "PromptModifier", promptModifier)
-    ConfigWriteValue("Settings", "Settings", "PromptUseNumpad", promptUseNumpad)
+    updates := Map()
+    updates.CaseSense := false
+    updates["MainHotkey"] := mainHotkey
+    updates["PromptModifier"] := promptModifier
+    updates["PromptUseNumpad"] := promptUseNumpad
     if (emojiHotkey != "")
-        ConfigWriteValue("Settings", "Settings", "EmojiHotkey", emojiHotkey)
+        updates["EmojiHotkey"] := emojiHotkey
     if (exitHotkey != "")
-        ConfigWriteValue("Settings", "Settings", "ExitHotkey", exitHotkey)
+        updates["ExitHotkey"] := exitHotkey
+
+    ConfigUpdateSectionValues("Settings", "Settings", updates)
 }
 
 ConfigReadFolderItems() {

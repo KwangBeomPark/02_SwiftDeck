@@ -273,7 +273,14 @@ class PreferencesManager {
     }
 
     OnSavePreferences(*) {
-        this.TrySavePreferences()
+        ; A failed write here is a save problem, not an unexpected crash: report
+        ; it as one instead of letting it reach the generic error dialog.
+        try {
+            this.TrySavePreferences()
+        } catch Error as err {
+            MsgBox("❌ The settings could not be saved.`n`n" . err.Message
+                . "`n`nYour previous settings are unchanged.", "Save Failed", 262160)
+        }
     }
 
     TrySavePreferences(showFeedback := true, reloadAfterSave := true) {
@@ -288,6 +295,12 @@ class PreferencesManager {
         }
         if (validName == "") {
             MsgBox("⚠️ '" . mainBase . "' is not a valid key name.`n`nNo settings were saved.", "Invalid Key", 262160)
+            return false
+        }
+        if IsModifierSymbolKey(mainBase) {
+            MsgBox("⚠️ '" . mainBase . "' is a modifier symbol, not a base key.`n`n"
+                . "Use the Ctrl/Shift/Win/Alt checkboxes for modifiers and pick a real key here.`n`n"
+                . "No settings were saved.", "Invalid Key", 262160)
             return false
         }
 
@@ -319,6 +332,12 @@ class PreferencesManager {
             if (rowKeyName == "") {
                 MsgBox("⚠️ '" . spec.Row.BaseKey . "' is not a valid key name for the " . spec.Label
                     . " shortcut.`n`nNo settings were saved.", "Invalid Key", 262160)
+                return false
+            }
+            if IsModifierSymbolKey(spec.Row.BaseKey) {
+                MsgBox("⚠️ '" . spec.Row.BaseKey . "' is a modifier symbol, not a base key for the "
+                    . spec.Label . " shortcut.`n`nUse the checkboxes for modifiers.`n`n"
+                    . "No settings were saved.", "Invalid Key", 262160)
                 return false
             }
             if (!spec.Row.HasModifier) {

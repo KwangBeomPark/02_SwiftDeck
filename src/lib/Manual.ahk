@@ -295,11 +295,19 @@ OpenAppManual(lang := "", parentHwnd := 0) {
     ; Load initial text content
     texts := GetManualTexts(lang)
 
-    ; Create ActiveX HTMLFile control for rich text display
-    edtManual := mGui.Add("ActiveX", "x10 y40 w670 h640", "htmlfile")
-    doc := edtManual.Value
-    doc.write(FormatTextToHtml(BuildManualText(lang, texts)))
-    doc.close()
+    ; Create ActiveX HTMLFile control for rich text display. Some managed PCs
+    ; block ActiveX by policy, and an unguarded failure here would take the whole
+    ; manual window with it — so fall back to a plain read-only Edit.
+    edtManual := ""
+    try {
+        edtManual := mGui.Add("ActiveX", "x10 y40 w670 h640", "htmlfile")
+        doc := edtManual.Value
+        doc.write(FormatTextToHtml(BuildManualText(lang, texts)))
+        doc.close()
+    } catch {
+        edtManual := ""
+        mGui.Add("Edit", "x10 y40 w670 h640 ReadOnly Multi", BuildManualText(lang, texts))
+    }
 
     ; --- Dynamic update on language change ---
     ddlLang.OnEvent("Change", OnLangChange)
@@ -309,6 +317,9 @@ OpenAppManual(lang := "", parentHwnd := 0) {
         newTexts := GetManualTexts(newLang)
         SaveManualLanguage(newLang)
 
+        ; Nothing to re-render when the rich control could not be created.
+        if (edtManual == "")
+            return
         doc := edtManual.Value
         doc.open()
         doc.write(FormatTextToHtml(BuildManualText(newLang, newTexts)))

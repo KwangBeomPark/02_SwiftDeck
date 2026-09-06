@@ -17,6 +17,35 @@
 ; Global cache store (for top-level and 1st-level folder menus)
 global g_FolderMenuCache := Map()
 
+; Paths whose existence check recently failed, keyed by path with the tick count
+; of the failure. A disconnected network drive makes FileExist block for the full
+; SMB timeout, and the favorites menu probes every root on every press — so one
+; unreachable share stalls the main hotkey each time. Remember the failure and
+; short-circuit it briefly instead of paying the timeout again.
+global g_FolderProbeFailures := Map()
+global g_FolderProbeCooldownMs := 60000
+
+FolderProbeRecentlyFailed(rootPath) {
+    global g_FolderProbeFailures, g_FolderProbeCooldownMs
+    if !g_FolderProbeFailures.Has(rootPath)
+        return false
+    if (A_TickCount - g_FolderProbeFailures[rootPath] < g_FolderProbeCooldownMs)
+        return true
+    ; Cooldown expired: probe again so a reconnected drive comes back by itself.
+    g_FolderProbeFailures.Delete(rootPath)
+    return false
+}
+
+RecordFolderProbeResult(rootPath, reachable) {
+    global g_FolderProbeFailures
+    if (reachable) {
+        if g_FolderProbeFailures.Has(rootPath)
+            g_FolderProbeFailures.Delete(rootPath)
+    } else {
+        g_FolderProbeFailures[rootPath] := A_TickCount
+    }
+}
+
 ShowFavoritesMenu() {
     if !ConfigExists("Folders") {
         MsgBox("⚠️ Cannot find the setting file.", "Error", 262160)
@@ -58,7 +87,7 @@ ShowFavoritesMenu() {
     ; Route the trailing actions through the same label set so a favorite that
     ; happens to carry one of these names cannot hijack the Disable() below.
     addFolderMenuText := UniqueMenuLabel(
-        "⭐ Add Current Folder  [" . FormatHotkeyDisplay(addFolderHotkey) . "]", usedRootLabels)
+        "⭐ Add Current Folder  [" . FormatHotkeyForMenu(addFolderHotkey) . "]", usedRootLabels)
 
     mainContextMenu.Add(addFolderMenuText, (*) => AddCurrentExplorerFolder())
     ; Use the cheap window-class probe, not the COM lookup: this runs on every
@@ -178,12 +207,17 @@ BuildFolderSubmenu(rootPath, rootLabel) {
     maxLv1 := 30  ; Max Level-1 subfolders to display
     maxLv2 := 20  ; Max Level-2 subfolders to display
 
-    ; Show warning menu item if folder doesn't exist or drive is disconnected
-    if !FileExist(rootPath) || !InStr(FileExist(rootPath), "D") {
-        MenuLv0 := Menu()
-        MenuLv0.Add(SafeMenuLabel("No Folder Exist: " . rootPath, "No Folder Exist", 80), ShowFolderWarningMsg.Bind())
-        return MenuLv0
-    }
+    ; Show warning menu item if folder doesn't exist or drive is disconnected.
+    ; Skip the probe entirely while a recent failure is still in its cooldown, so
+    ; an unreachable share cannot stall the menu on every press.
+    if FolderProbeRecentlyFailed(rootPath)
+        return BuildMissingFolderMenu(rootPath)
+
+    attributes := FileExist(rootPath)
+    reachable := (attributes != "" && InStr(attributes, "D"))
+    RecordFolderProbeResult(rootPath, reachable)
+    if !reachable
+        return BuildMissingFolderMenu(rootPath)
 
     ; [Cache Logic Start]
     ; Extract modification time hash (very fast — reads only 1 level even on network drives)
@@ -243,6 +277,13 @@ BuildFolderSubmenu(rootPath, rootLabel) {
     g_FolderMenuCache[rootPath] := { Hash: currentHash, Menu: menuLv1 }
 
     return menuLv1
+}
+
+BuildMissingFolderMenu(rootPath) {
+    missingMenu := Menu()
+    missingMenu.Add(SafeMenuLabel("No Folder Exist: " . rootPath, "No Folder Exist", 80),
+        ShowFolderWarningMsg.Bind())
+    return missingMenu
 }
 
 ShowFolderWarningMsg() {

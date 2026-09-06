@@ -324,6 +324,24 @@ FormatHotkeyDisplay(hotkeyLabel) {
     return formattedHK
 }
 
+; A base key that is itself a modifier symbol cannot survive a round trip:
+; BuildKeyString appends it, and ParseKeyString then reads it back as a modifier
+; and leaves an empty key — so "Ctrl + the + key" reopens as "Ctrl+Shift+ nothing".
+; GetKeyName accepts them (they resolve to "=", "6", "3", "1", "7"), so they have
+; to be rejected on their own. "&" is AutoHotkey's custom-combination separator.
+IsModifierSymbolKey(baseKey) {
+    return (baseKey == "^" || baseKey == "+" || baseKey == "#" || baseKey == "!" || baseKey == "&")
+}
+
+; A hotkey shown inside a menu label still comes from the settings file, so it
+; needs the same treatment as any other user text: "&" escaped, and clipped so a
+; hand-edited value cannot push the label past what Menu.Add accepts. Exceeding
+; it throws — and in the tray that happens after A_TrayMenu.Delete(), leaving no
+; Exit or Settings item at all.
+FormatHotkeyForMenu(hotkeyLabel) {
+    return SafeMenuLabel(FormatHotkeyDisplay(hotkeyLabel), "?", 40)
+}
+
 ParseIniKeyValuePairs(lineStr) {
     if !lineStr
         return { Key: "", Val: "" }

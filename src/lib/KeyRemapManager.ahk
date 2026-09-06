@@ -330,6 +330,15 @@ class KeyRemapManager {
                 return
             }
 
+            ; The source key is stored as an INI key, so it is subject to the same
+            ; syntax rules as a favorite nickname: "=" splits the entry and a
+            ; leading "[" or ";" would swallow the remaps stored after it.
+            if (!IsPlainIniKeySafe(src)) {
+                MsgBox("⚠️ '" . src . "' cannot be stored as a shortcut.`n`n" . GetIniKeyRuleMessage(),
+                    "Invalid Key", 262160)
+                return
+            }
+
             ; A remap must not target one of SwiftDeck's own shortcuts. Both
             ; register the same criterion-less hotkey, so they overwrite each
             ; other, and deleting the remap afterwards turns the app's shortcut
