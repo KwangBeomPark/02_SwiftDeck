@@ -476,9 +476,14 @@ class HotstringManager {
             ; Without the check the item saves, fails to register, and the
             ; warning tooltip is immediately painted over by the success toast.
             if (StrLen(triggerText) > 40) {
-                MsgBox("⚠️ The abbreviation is " . StrLen(triggerText) . " characters long."
-                    . "`n`nWindows hotstrings allow at most 40, so this one could be saved but "
-                    . "would never trigger. Please shorten it.", "Abbreviation Too Long", 262192)
+                ; StrLen counts UTF-16 units, which is also what AutoHotkey's own
+                ; limit counts, so an emoji costs two — say "units", not
+                ; "characters", rather than appearing to miscount.
+                MsgBox("⚠️ This abbreviation is too long: " . StrLen(triggerText)
+                    . " of the 40 units AutoHotkey allows."
+                    . "`n`nA longer one can be saved but would never trigger. Please shorten it."
+                    . "`n`nNote that emoji and some symbols count as two units each.",
+                    "Abbreviation Too Long", 262192)
                 return
             }
 

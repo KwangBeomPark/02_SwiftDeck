@@ -113,8 +113,10 @@ defaultSettings := { MainHotkey: "F1", PromptModifier: "#", PromptUseNumpad: 1,
     EmojiHotkey: "^#Space", ExitHotkey: "^#Escape" }
 
 AssertEqual(FindAppHotkeyConflict("F1", defaultSettings), "Favorites Menu", "F1 is reserved by the favorites menu")
-AssertEqual(FindAppHotkeyConflict("^F1", defaultSettings), "Add Current Explorer Folder",
-    "Ctrl+F1 is reserved by the add-folder shortcut")
+; Ctrl+F1 is registered under HotIf, so a plain remap coexists with it and
+; deleting that remap cannot switch it off — it is not reserved.
+AssertEqual(FindAppHotkeyConflict("^F1", defaultSettings), "",
+    "The Explorer-only add-folder shortcut does not block a remap")
 AssertEqual(FindAppHotkeyConflict("^#Space", defaultSettings), "Emoji & Symbols", "Emoji hotkey is reserved")
 AssertEqual(FindAppHotkeyConflict("^#Escape", defaultSettings), "Exit App", "Exit hotkey is reserved")
 AssertEqual(FindAppHotkeyConflict("+#Space", defaultSettings), "Prompt Popup Menu", "Prompt menu hotkey is reserved")
@@ -132,6 +134,35 @@ movedSettings := { MainHotkey: "F9", PromptModifier: "^", PromptUseNumpad: 0,
 AssertEqual(FindAppHotkeyConflict("F9", movedSettings), "Favorites Menu", "Reserved set follows a moved main hotkey")
 AssertEqual(FindAppHotkeyConflict("F1", movedSettings), "", "The old main hotkey is released")
 AssertEqual(FindAppHotkeyConflict("^5", movedSettings), "Quick Prompt 5", "Standard-number prompt slots are reserved")
+
+; --- Alias spellings must not slip past the guard ---
+; AutoHotkey registers "Esc" and "Escape" as separate hotkeys bound to the same
+; physical key, and the later registration simply wins — so comparing the raw
+; text would let a remap silently take over an app shortcut.
+AssertEqual(NormalizeBaseKey("Esc"), NormalizeBaseKey("Escape"), "Esc and Escape canonicalize alike")
+AssertEqual(NormalizeBaseKey("vk1B"), NormalizeBaseKey("Escape"), "A vk code matches its named key")
+AssertEqual(NormalizeBaseKey("Ins"), NormalizeBaseKey("Insert"), "Ins and Insert canonicalize alike")
+AssertEqual(NormalizeBaseKey("Del"), NormalizeBaseKey("Delete"), "Del and Delete canonicalize alike")
+AssertEqual(NormalizeBaseKey("ESCAPE"), NormalizeBaseKey("escape"), "Canonicalization ignores case")
+AssertEqual(NormalizeBaseKey(""), "", "An empty base key stays empty")
+if (NormalizeBaseKey("F1") == NormalizeBaseKey("F2"))
+    throw Error("Different keys must not canonicalize alike")
+; Enter and NumpadEnter share a virtual key and are told apart by scan code, so
+; identifying by virtual key alone would wrongly merge them.
+if (NormalizeBaseKey("Enter") == NormalizeBaseKey("NumpadEnter"))
+    throw Error("Enter and NumpadEnter are different keys and must not merge")
+; Unrecognized text still compares equal to itself rather than collapsing to "".
+AssertEqual(NormalizeBaseKey("Return"), NormalizeBaseKey("return"), "Unknown key names fall back consistently")
+if (NormalizeBaseKey("Return") == NormalizeBaseKey("Enter"))
+    throw Error("'Return' is not a valid key name in v2 and must not pass as Enter")
+
+AssertEqual(NormalizeHotkey("^#Esc"), NormalizeHotkey("^#Escape"), "Whole hotkeys compare through aliases")
+aliasSettings := { MainHotkey: "F1", PromptModifier: "#", PromptUseNumpad: 1,
+    EmojiHotkey: "^#Space", ExitHotkey: "^#Esc" }
+AssertEqual(FindAppHotkeyConflict("^#Escape", aliasSettings), "Exit App",
+    "A differently spelled exit hotkey is still detected")
+AssertEqual(ValidateHotkeyAssignments("Escape", "#", 1, "^#Space", "^#Esc"), "",
+    "Unrelated keys still validate cleanly")
 
 ; Prompt slots disappear from the reserved set when prompt hotkeys are off.
 noPromptSettings := { MainHotkey: "F1", PromptModifier: "", PromptUseNumpad: 1,

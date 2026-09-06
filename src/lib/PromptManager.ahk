@@ -274,16 +274,15 @@ class PromptManager {
             ToolTip("⏳ Translating...")
             WinSetEnabled(0, popup.Hwnd)
             
-            try {
-                translatedText := GoogleTranslate(srcText, targetLang)
-                if (translatedText != "")
-                    edtMsg.Value := translatedText
-                else
-                    MsgBox("Translation failed.`n`nThe service could not be reached, or it returned"
-                        . " nothing usable. Your text was left unchanged.", "Translation Failed", 262160)
-            } catch {
-                MsgBox("Translation failed.", "Error", 262160)
-            }
+            ; GoogleTranslate reports failure as "" rather than throwing, so the
+            ; empty branch is the only failure path — a catch here would be dead
+            ; code. The window is re-enabled below whatever the outcome.
+            translatedText := GoogleTranslate(srcText, targetLang)
+            if (translatedText != "")
+                edtMsg.Value := translatedText
+            else
+                MsgBox("Translation failed.`n`nThe service could not be reached, or it returned"
+                    . " nothing usable. Your text was left unchanged.", "Translation Failed", 262160)
             
             WinSetEnabled(1, popup.Hwnd)
             WinActivate(popup.Hwnd)

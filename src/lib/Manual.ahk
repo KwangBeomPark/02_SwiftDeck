@@ -299,15 +299,26 @@ OpenAppManual(lang := "", parentHwnd := 0) {
     ; block ActiveX by policy, and an unguarded failure here would take the whole
     ; manual window with it — so fall back to a plain read-only Edit.
     edtManual := ""
+    plainManual := ""
     try {
         edtManual := mGui.Add("ActiveX", "x10 y40 w670 h640", "htmlfile")
-        doc := edtManual.Value
-        doc.write(FormatTextToHtml(BuildManualText(lang, texts)))
-        doc.close()
     } catch {
         edtManual := ""
-        mGui.Add("Edit", "x10 y40 w670 h640 ReadOnly Multi", BuildManualText(lang, texts))
     }
+    if (edtManual) {
+        try {
+            doc := edtManual.Value
+            doc.write(FormatTextToHtml(BuildManualText(lang, texts)))
+            doc.close()
+        } catch {
+            ; The control exists but cannot render. Hide it rather than stacking
+            ; the fallback on top of a live control at the same coordinates.
+            try edtManual.Visible := false
+            edtManual := ""
+        }
+    }
+    if (!edtManual)
+        plainManual := mGui.Add("Edit", "x10 y40 w670 h640 ReadOnly Multi", BuildManualText(lang, texts))
 
     ; --- Dynamic update on language change ---
     ddlLang.OnEvent("Change", OnLangChange)
@@ -317,9 +328,13 @@ OpenAppManual(lang := "", parentHwnd := 0) {
         newTexts := GetManualTexts(newLang)
         SaveManualLanguage(newLang)
 
-        ; Nothing to re-render when the rich control could not be created.
-        if (edtManual == "")
+        ; The plain fallback still has to follow the language change, or the
+        ; dropdown and the saved preference would move while the text did not.
+        if (edtManual == "") {
+            if (plainManual)
+                plainManual.Value := BuildManualText(newLang, newTexts)
             return
+        }
         doc := edtManual.Value
         doc.open()
         doc.write(FormatTextToHtml(BuildManualText(newLang, newTexts)))

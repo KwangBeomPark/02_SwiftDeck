@@ -197,6 +197,32 @@ BuildKeyString(ctrl, shift, win, alt, baseKey) {
     return prefix . baseKey
 }
 
+; Canonicalizes a base key so two spellings of the same physical key compare
+; equal. "Esc" and "Escape" (also "Ins"/"Insert", "Return"/"Enter", "vk1B") are
+; the same key to Windows but different strings to AutoHotkey, which registers
+; them as separate hotkeys bound to the same key — the later one simply wins.
+; Comparing raw text would let a conflict check pass on a spelling difference.
+NormalizeBaseKey(baseKey) {
+    trimmed := Trim(baseKey)
+    if (trimmed == "")
+        return ""
+
+    ; Identify by virtual key + scan code rather than by name. Measured:
+    ; Esc / Escape / vk1B all resolve to vk01B sc0001, while Enter and
+    ; NumpadEnter share vk00D but differ in scan code — so the pair together is
+    ; what distinguishes physical keys. Names are not reliable on their own:
+    ; GetKeyName("Return") is empty in v2 even though v1 accepted it.
+    try {
+        vk := GetKeyVK(trimmed)
+        sc := GetKeySC(trimmed)
+        if (vk || sc)
+            return Format("vk{:03X}sc{:04X}", vk, sc)
+    }
+    ; Unrecognized text (including "Return") falls back to its own spelling, so
+    ; two identical unknown entries still compare equal.
+    return StrLower(trimmed)
+}
+
 NormalizeHotkey(hotkeyText) {
     parsed := ParseKeyString(hotkeyText)
     return StrLower(BuildKeyString(
@@ -204,7 +230,7 @@ NormalizeHotkey(hotkeyText) {
         parsed.Mods.Shift,
         parsed.Mods.Win,
         parsed.Mods.Alt,
-        parsed.BaseKey
+        NormalizeBaseKey(parsed.BaseKey)
     ))
 }
 
@@ -255,7 +281,10 @@ GetAppHotkeyAssignments(mainHotkey, promptModifier, promptUseNumpad, emojiHotkey
         promptMenuHotkey := GetPromptMenuHotkey()
     assignments := [
         { Name: "Favorites Menu", Hotkey: mainHotkey },
-        { Name: "Add Current Explorer Folder", Hotkey: GetAddFolderHotkey(mainHotkey) },
+        ; Registered under HotIf (Explorer windows only). A criterion-less key
+        ; remap coexists with it rather than replacing it, and removing that
+        ; remap cannot switch it off, so it is not reserved against remapping.
+        { Name: "Add Current Explorer Folder", Hotkey: GetAddFolderHotkey(mainHotkey), Contextual: true },
         { Name: "Prompt Popup Menu", Hotkey: promptMenuHotkey },
         { Name: "Emoji & Symbols", Hotkey: emojiHotkey },
         { Name: "Exit App", Hotkey: exitHotkey }
@@ -289,6 +318,9 @@ FindAppHotkeyConflict(candidateHotkey, settings) {
         settings.ExitHotkey
     )
     for assignment in assignments {
+        ; Contextual hotkeys are not exclusive: both registrations survive.
+        if (assignment.HasOwnProp("Contextual") && assignment.Contextual)
+            continue
         if (NormalizeHotkey(assignment.Hotkey) == normalized)
             return assignment.Name
     }

@@ -330,6 +330,19 @@ class KeyRemapManager {
                 return
             }
 
+            ; Same rule as the hotkey editors: a modifier symbol is not a base
+            ; key. GetKeyName accepts "+" (as "="), so it passes validation, but
+            ; the entry round-trips through ParseKeyString as a bare modifier —
+            ; the list then shows "Ctrl + Shift + []" and a modifier-only Send.
+            for spec in [{ Label: "source", Key: srcBase }, { Label: "destination", Key: dstBase }] {
+                if IsModifierSymbolKey(spec.Key) {
+                    MsgBox("⚠️ '" . spec.Key . "' is a modifier symbol, not a " . spec.Label . " key."
+                        . "`n`nUse the Ctrl/Shift/Win/Alt checkboxes for modifiers.",
+                        "Invalid Key", 262160)
+                    return
+                }
+            }
+
             ; The source key is stored as an INI key, so it is subject to the same
             ; syntax rules as a favorite nickname: "=" splits the entry and a
             ; leading "[" or ";" would swallow the remaps stored after it.
