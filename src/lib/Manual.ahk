@@ -35,7 +35,9 @@ OpenAppManual(lang := "", parentHwnd := 0) {
     else if !IsSupportedManualLanguage(lang)
         lang := "EN"
 
-    mGui := Gui("+AlwaysOnTop +Resize -MaximizeBox", "App Manual")
+    ; 700x720 is this window's design size; opt out of DPI scaling rather than
+    ; let the Close button fall off the bottom of a scaled-up small screen.
+    mGui := Gui("+AlwaysOnTop +Resize -MaximizeBox" . GetFittingGuiOptions(700, 720), "App Manual")
     if (parentHwnd)
         mGui.Opt("+Owner" . parentHwnd)
     EnableDarkMode(mGui)

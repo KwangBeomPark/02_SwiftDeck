@@ -542,6 +542,35 @@ _FindClosingQuote(str, startPos) {
 ; --- Window / UI Helpers ---
 ; =================================================================================
 
+; Windows a layout asks for in 96-DPI units grow with display scaling, but the
+; work area does not: at 175% on a 1080p panel the settings window would be
+; 1164px tall against 996px of usable height. ShowCenteredOnMouse pins an
+; oversized window to the top-left so its title bar stays reachable, but the
+; overflowing bottom then cannot be reached at all — the title bar cannot be
+; dragged above the top of the screen — which is where Factory Reset lives.
+;
+; Returns true when the scaled size would not fit, so the caller can opt that
+; window out of DPI scaling and keep every control reachable.
+WouldExceedWorkArea(logicalWidth, logicalHeight, dpi := 0, workWidth := 0, workHeight := 0) {
+    if (dpi <= 0)
+        dpi := A_ScreenDPI
+    if (workWidth <= 0 || workHeight <= 0) {
+        MonitorGetWorkArea(MonitorGetPrimary(), &wl, &wt, &wr, &wb)
+        workWidth := wr - wl
+        workHeight := wb - wt
+    }
+
+    scale := dpi / 96
+    return (Round(logicalWidth * scale) > workWidth) || (Round(logicalHeight * scale) > workHeight)
+}
+
+; GUI option string for a window of this design size. Empty in the normal case;
+; "-DPIScale" when honouring the display scaling would push controls off-screen,
+; which renders the window smaller but complete rather than large and truncated.
+GetFittingGuiOptions(logicalWidth, logicalHeight) {
+    return WouldExceedWorkArea(logicalWidth, logicalHeight) ? " -DPIScale" : ""
+}
+
 ShowCenteredOnMouse(guiObj, options := "") {
     guiObj.Show("Hide " . options)
     guiObj.GetPos(,, &gW, &gH)

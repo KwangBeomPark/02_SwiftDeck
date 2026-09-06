@@ -206,6 +206,24 @@ AssertEqual(StrJoin(["only"]), "only", "Join a single item")
 AssertEqual(StrJoin(["a", "b", "c"]), "a, b, c", "Join with the default separator")
 AssertEqual(StrJoin(["a", "b"], " | "), "a | b", "Join with a custom separator")
 
+; --- High-DPI fit ---
+; Measured design sizes: the settings window is 514x665 and the manual 700x720
+; in 96-DPI units. Display scaling multiplies those; the work area does not
+; follow, so on a small panel at high scaling the bottom becomes unreachable.
+AssertEqual(WouldExceedWorkArea(514, 665, 96, 1920, 1032), false, "Settings fits a 1080p screen at 100%")
+AssertEqual(WouldExceedWorkArea(514, 665, 120, 1920, 1020), false, "Settings fits a 1080p screen at 125%")
+AssertEqual(WouldExceedWorkArea(514, 665, 144, 1920, 1008), false, "Settings fits a 1080p screen at 150%")
+AssertEqual(WouldExceedWorkArea(514, 665, 168, 1920, 996), true, "Settings overflows a 1080p screen at 175%")
+AssertEqual(WouldExceedWorkArea(514, 665, 192, 1920, 984), true, "Settings overflows a 1080p screen at 200%")
+; 200% is normally paired with a 4K panel, where everything doubles together.
+AssertEqual(WouldExceedWorkArea(514, 665, 192, 3840, 2064), false, "Settings fits 4K at 200%")
+AssertEqual(WouldExceedWorkArea(700, 720, 192, 3840, 2064), false, "Manual fits 4K at 200%")
+; The manual is taller, so it runs out of room one step earlier.
+AssertEqual(WouldExceedWorkArea(700, 720, 144, 1920, 1008), true, "Manual overflows a 1080p screen at 150%")
+AssertEqual(WouldExceedWorkArea(700, 720, 120, 1920, 1020), false, "Manual fits a 1080p screen at 125%")
+; Width matters too, on narrow screens.
+AssertEqual(WouldExceedWorkArea(700, 720, 96, 640, 1032), true, "A window wider than the work area also counts")
+
 centered := CalculateCenteredWindowPosition(500, 400, 0, 0, 1920, 1040)
 AssertEqual(centered.X, 710, "Primary monitor center X")
 AssertEqual(centered.Y, 320, "Primary monitor center Y")

@@ -25,7 +25,12 @@ class DashboardManager {
     }
 
     __New() {
-        this.hGui := Gui("+AlwaysOnTop +OwnDialogs", "SwiftDeck App Settings")
+        ; Measured design size of this window. Above roughly 150% scaling on a
+        ; 1080p panel the scaled window is taller than the work area, and the
+        ; part that falls off the bottom — Factory Reset, backup and restore —
+        ; cannot be scrolled or dragged back into view.
+        this.hGui := Gui("+AlwaysOnTop +OwnDialogs" . GetFittingGuiOptions(514, 665),
+            "SwiftDeck App Settings")
         ApplyTheme(this.hGui, "SwiftDeck", "")
         this.hGui.OnEvent("Close", ObjBindMethod(this, "HandleClose"))
 
