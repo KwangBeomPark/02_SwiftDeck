@@ -99,10 +99,6 @@ _ExecutePromptFromMenu(groupNum, itemIdx, *) {
     if (HasSpecialKeys(msg)) {
         ExecutePromptSequence(msg)
     } else {
-        if !TrySetPromptClipboard(msg) {
-            ReportClipboardBusy()
-            return
-        }
-        Send("^v")
+        PastePromptText(msg)
     }
 }

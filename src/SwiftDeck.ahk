@@ -290,5 +290,16 @@ ShowHotkeyCheatSheet() {
         . "😀 Emoji & Symbols`t: " . emojiHK . "`n"
         . "❌ Exit App`t: " . exitHK
 
+    ; Quick Prompts default to the numeric keypad, which most laptops under 15"
+    ; do not have. Nothing fails visibly in that case — the shortcut simply does
+    ; not exist — so say where to change it rather than leave the user pressing
+    ; a key that can never work.
+    if (settings.PromptModifier != "" && settings.PromptUseNumpad) {
+        msg .= "`n`nNo numeric keypad on your keyboard?`n"
+            . "Quick Prompts will not respond. Switch them to the top-row number keys in`n"
+            . "App Settings → ⚙️ General → Quick Prompts Hotkey → " . '"Standard 0~9"'
+            . "`n(right-click the tray icon → ⚙️ App Settings)"
+    }
+
     MsgBox(msg, "⌨️ SwiftDeck — Hotkey Cheat Sheet", 262144) ; 0x40000 = always on top
 }

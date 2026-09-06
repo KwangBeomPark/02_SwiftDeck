@@ -26,6 +26,77 @@ ReportClipboardBusy() {
     SetTimer(() => ToolTip(), -2500)
 }
 
+; A restore that is still pending, so two prompts in quick succession do not
+; snapshot the first prompt's own text as if it were the user's clipboard.
+global g_pendingClipboardRestore := ""
+
+; Pasting a prompt used to leave the prompt text on the clipboard, destroying
+; whatever the user had copied — an ordinary loss when the work is copying a
+; cell and then firing a prompt. So the clipboard is snapshotted and put back.
+; This covers plain prompts only; prompts containing {Key} sequences go through
+; ExecutePromptSequence, which still pastes each fragment without restoring.
+;
+; The delay is deliberately generous. Nothing tells us when the target has
+; actually read the clipboard, and the two ways to be wrong are not equal:
+; restoring too early makes the target paste the user's PREVIOUS clipboard —
+; silently inserting unrelated, possibly confidential text into an email —
+; while restoring too late only leaves the prompt on the clipboard a while
+; longer. Measured: a consumer that processes Ctrl+V at ~900ms already loses
+; with a 700ms delay, and RDP or Citrix clipboard redirection routinely exceeds
+; a second. Waiting costs nothing, because the guard below refuses to overwrite
+; anything the user copied in the meantime.
+PastePromptText(text, color := "black", sizePt := 11) {
+    global g_pendingClipboardRestore
+
+    saved := ""
+    hasSaved := false
+    if (g_pendingClipboardRestore != "") {
+        ; A restore is already queued; its snapshot is the user's real clipboard.
+        saved := g_pendingClipboardRestore
+        hasSaved := true
+    } else {
+        try {
+            saved := ClipboardAll()
+            hasSaved := true
+        }
+    }
+
+    if !TrySetPromptClipboard(text, color, sizePt) {
+        ReportClipboardBusy()
+        return false
+    }
+
+    Send("^v")
+
+    if (hasSaved) {
+        g_pendingClipboardRestore := saved
+        SetTimer(() => RestoreClipboardAfterPaste(saved, text), -3000)
+    }
+    return true
+}
+
+RestoreClipboardAfterPaste(saved, pastedText) {
+    global g_pendingClipboardRestore
+
+    current := ""
+    try current := A_Clipboard
+    catch {
+        g_pendingClipboardRestore := ""
+        return
+    }
+
+    ; Anything other than exactly what we pasted means the user (or another app)
+    ; has since put something newer there, which must win. "!==" because "!=" is
+    ; case-insensitive in AutoHotkey v2.
+    if (current !== pastedText) {
+        g_pendingClipboardRestore := ""
+        return
+    }
+
+    try A_Clipboard := saved
+    g_pendingClipboardRestore := ""
+}
+
 SetStyledClipboard(text, color, sizePt) {
     htmlText := HtmlEncodeWithBr(text)  ; HTML-safe encoding + newlines → <br>
     frag :=

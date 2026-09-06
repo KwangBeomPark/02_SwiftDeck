@@ -576,6 +576,7 @@ ConfigWriteFolderItems(items) {
 }
 
 ConfigReadPromptData() {
+    encodingVersion := ConfigReadPromptEncodingVersion()
     promptData := Map()
     loop 10 {
         num := A_Index - 1
@@ -586,7 +587,7 @@ ConfigReadPromptData() {
             loop parse, content, "`n", "`r" {
                 pair := ParseIniKeyValuePairs(A_LoopField)
                 if (pair.Key != "") {
-                    promptData[num].Push({ Title: pair.Key, Msg: StrReplace(pair.Val, "\n", "`n") })
+                    promptData[num].Push({ Title: pair.Key, Msg: ConfigDecodePromptText(pair.Val, encodingVersion) })
                 }
             }
         }
@@ -595,6 +596,7 @@ ConfigReadPromptData() {
 }
 
 ConfigReadPromptItems(groupNum) {
+    encodingVersion := ConfigReadPromptEncodingVersion()
     items := []
     content := ConfigReadSection("Prompts", "Numpad" . groupNum, "")
 
@@ -606,7 +608,7 @@ ConfigReadPromptItems(groupNum) {
                     fontSize: 11,
                     fontColor: "black",
                     label: pair.Key,
-                    msg: StrReplace(pair.Val, "\n", "`n")
+                    msg: ConfigDecodePromptText(pair.Val, encodingVersion)
                 })
             }
         }
@@ -630,10 +632,65 @@ ConfigGetMaxValueLength() {
     return 30000
 }
 
+; Prompts are stored one per INI line, so a real newline has to be encoded. The
+; original encoding mapped a newline to the two characters \n but left a literal
+; backslash untouched, so any prompt containing "\n" decoded into a line break:
+; measured, "Save it to C:\new\report.xlsx" came back as
+; "Save it to C:<newline>ew\report.xlsx". The shipped default prompts hit this
+; too — their instruction text mentions (\n) literally.
+;
+; Version 2 escapes the backslash as well. Files from older versions carry no
+; marker and keep being read with the original rule, so nothing changes for them
+; until the next save rewrites the file in the new encoding.
+ConfigGetPromptEncodingVersion() {
+    return 2
+}
+
+ConfigReadPromptEncodingVersion() {
+    return ConfigReadNumber("Prompts", "Meta", "PromptEncoding", 1)
+}
+
+ConfigEncodePromptText(text) {
+    ; Backslashes first, or the "\n" produced below would be escaped in turn.
+    encoded := StrReplace(text, "\", "\\")
+    encoded := StrReplace(encoded, "`r`n", "\n")
+    encoded := StrReplace(encoded, "`n", "\n")
+    encoded := StrReplace(encoded, "`r", "\n")
+    return encoded
+}
+
+ConfigDecodePromptText(encoded, encodingVersion) {
+    if (encodingVersion < 2)
+        return StrReplace(encoded, "\n", "`n") ; legacy rule, ambiguous by design
+
+    ; One left-to-right pass: a backslash always consumes the character after
+    ; it, so "\\n" is a backslash followed by n rather than a line break.
+    result := ""
+    pos := 1
+    length := StrLen(encoded)
+    while (pos <= length) {
+        ch := SubStr(encoded, pos, 1)
+        if (ch == "\" && pos < length) {
+            next := SubStr(encoded, pos + 1, 1)
+            if (next == "n")
+                result .= "`n"
+            else if (next == "\")
+                result .= "\"
+            else
+                result .= ch . next ; unrecognized escape: keep it verbatim
+            pos += 2
+            continue
+        }
+        result .= ch
+        pos++
+    }
+    return result
+}
+
 ConfigBuildPromptSectionText(items) {
     content := ""
     for item in items
-        content .= item.Title . "=" . StrReplace(item.Msg, "`n", "\n") . "`n"
+        content .= item.Title . "=" . ConfigEncodePromptText(item.Msg) . "`n"
     return content
 }
 
@@ -642,7 +699,10 @@ ConfigBuildPromptSectionText(items) {
 ; cannot get back intact.
 ConfigCheckPromptSlotLimit(items) {
     for item in items {
-        encodedLength := StrLen(StrReplace(item.Msg, "`n", "\n"))
+        ; Measure what actually gets written. Using the old formula here let a
+        ; backslash-heavy prompt through: 20,000 backslashes measured as 20,004
+        ; but were stored as 40,004 characters and read back truncated.
+        encodedLength := StrLen(ConfigEncodePromptText(item.Msg))
         if (encodedLength > ConfigGetMaxValueLength())
             return "One prompt is " . encodedLength . " characters, over the "
                 . ConfigGetMaxValueLength() . " character limit for a single prompt.`n`n"
@@ -660,15 +720,36 @@ ConfigCheckPromptSlotLimit(items) {
 }
 
 ConfigWritePromptData(promptData) {
+    ; Validate every slot before writing any of them. Failing half-way used to
+    ; leave slots already converted to the new encoding while the marker — written
+    ; last — was still missing, so the next read applied the legacy rule and
+    ; doubled every backslash, permanently, on the following save.
     loop 10 {
         num := A_Index - 1
         items := (promptData[num].Length > 0) ? promptData[num] : []
-        ; Never write something the reader cannot get back: an over-long section
-        ; reads as empty, which the following save persists as deletion.
         limitWarning := ConfigCheckPromptSlotLimit(items)
         if (limitWarning != "")
             throw Error("Prompt slot " . num . ": " . limitWarning)
-        ConfigWriteSection("Prompts", "Numpad" . num, ConfigBuildPromptSectionText(items))
+    }
+
+    ; And roll the whole file back if a write fails part-way for any other
+    ; reason — a locked or cloud-synced file, most likely.
+    configPath := GetConfigPath("Prompts")
+    rollbackPath := ConfigCreateRollbackCopy(configPath)
+    try {
+        loop 10 {
+            num := A_Index - 1
+            items := (promptData[num].Length > 0) ? promptData[num] : []
+            ConfigWriteSection("Prompts", "Numpad" . num, ConfigBuildPromptSectionText(items))
+        }
+        ; Recorded after the slots: a reader that sees this marker knows every
+        ; slot above is in the new encoding.
+        ConfigWriteValue("Prompts", "Meta", "PromptEncoding", ConfigGetPromptEncodingVersion())
+    } catch Error as err {
+        ConfigRestoreRollbackCopy(configPath, rollbackPath)
+        throw err
+    } finally {
+        ConfigDeleteFileQuietly(rollbackPath)
     }
 }
 
@@ -976,20 +1057,22 @@ GetDefaultFolderData() {
 }
 
 GetDefaultHotkeyData() {
-    return "[Numpad1]`n"
-    . "1 Outlook Active Email Analyzer=Please analyze this email thread and provide a highly condensed, dense summary in Korean. 1. If I am in CC (Cc/참조), outline the full context, background discussion, and core consensus of the entire thread so I don't miss the big picture. 2. For Tax/Legal/Compliance issues, detail the precise root cause, legal grounds/clauses, and technical terms. 3. For IT System/Finance/Sales improvements, clearly list: Who, What, Why, and the Risks if ignored. Output Style: Keep it extremely compact and space-efficient. Use only single newlines (\n) for line breaks. Never use double newlines (\n\n) or blank lines between sections, so that when copied, the entire output pastes as a single, cohesive, tightly spaced text block while preserving the exact line breaks.`n"
-    . "2 Outlook Draft Business Reply=Write a polite and professional reply email in Korean and in English based on the following key points: [insert]. Ensure a formal business tone suitable for corporate communications. Output Style: Extremely compact. Use only single newlines (\n) for line breaks. Never use double newlines (\n\n) or blank lines, so that when copied, the entire output pastes as a single, cohesive, tightly spaced text block while preserving the exact line breaks.`n"
-    . "3 Outlook Terminology & Abbreviation Decoder=Analyze the email and explain any industry-specific jargon, technical terms, or abbreviations in Korean with simple, clear definitions. Output Style: Extremely compact. Use only single newlines (\n) for line breaks. Never use double newlines (\n\n) or blank lines, so that when copied, the entire output pastes as a single, cohesive, tightly spaced text block while preserving the exact line breaks.`n"
-    . "4 Outlook Recipient & Org Analyzer=Please analyze the recipients (To, Cc) of this email thread and identify the [organizations] in Korean. Output Style: Extremely compact. Use only single newlines (\n) for line breaks. Never use double newlines (\n\n) or blank lines, so that when copied, the entire output pastes as a single, cohesive, tightly spaced text block while preserving the exact line breaks.`n`n"
+    return "[Meta]`n"
+    . "PromptEncoding=2`n`n"
+    . "[Numpad1]`n"
+    . "1 Outlook Active Email Analyzer=Please analyze this email thread and provide a highly condensed, dense summary in Korean. 1. If I am in CC (Cc/참조), outline the full context, background discussion, and core consensus of the entire thread so I don't miss the big picture. 2. For Tax/Legal/Compliance issues, detail the precise root cause, legal grounds/clauses, and technical terms. 3. For IT System/Finance/Sales improvements, clearly list: Who, What, Why, and the Risks if ignored. Output Style: Keep it extremely compact and space-efficient. Use only single newlines (\\n) for line breaks. Never use double newlines (\\n\\n) or blank lines between sections, so that when copied, the entire output pastes as a single, cohesive, tightly spaced text block while preserving the exact line breaks.`n"
+    . "2 Outlook Draft Business Reply=Write a polite and professional reply email in Korean and in English based on the following key points: [insert]. Ensure a formal business tone suitable for corporate communications. Output Style: Extremely compact. Use only single newlines (\\n) for line breaks. Never use double newlines (\\n\\n) or blank lines, so that when copied, the entire output pastes as a single, cohesive, tightly spaced text block while preserving the exact line breaks.`n"
+    . "3 Outlook Terminology & Abbreviation Decoder=Analyze the email and explain any industry-specific jargon, technical terms, or abbreviations in Korean with simple, clear definitions. Output Style: Extremely compact. Use only single newlines (\\n) for line breaks. Never use double newlines (\\n\\n) or blank lines, so that when copied, the entire output pastes as a single, cohesive, tightly spaced text block while preserving the exact line breaks.`n"
+    . "4 Outlook Recipient & Org Analyzer=Please analyze the recipients (To, Cc) of this email thread and identify the [organizations] in Korean. Output Style: Extremely compact. Use only single newlines (\\n) for line breaks. Never use double newlines (\\n\\n) or blank lines, so that when copied, the entire output pastes as a single, cohesive, tightly spaced text block while preserving the exact line breaks.`n`n"
     . "[Numpad2]`n"
-    . "1 Edge Active Page Analyzer=Please analyze the active document/page and provide a concise summary in Korean. First, identify the document type and characteristics (e.g., action-oriented task, informational report, legal/regulatory clause). Then, dynamically highlight approximately three key takeaways tailored to its type: if it requires action, outline the specific next steps; if it is for information, summarize the core concepts to understand; if it carries legal or compliance requirements, point out the essential obligations. Adapt the focus flexibly based on the document's nature. Output Style: Keep it extremely compact. Use only single newlines (\n) for line breaks. Never use double newlines (\n\n) or blank lines between sections, so that when copied, the entire output pastes as a single, cohesive, tightly spaced text block while preserving the exact line breaks.`n"
-    . "2 Edge Terminology & Abbreviation Decoder=Analyze the active document and explain any industry-specific jargon, technical terms, or abbreviations in Korean with simple, clear definitions. Output Style: Extremely compact. Use only single newlines (\n) for line breaks. Never use double newlines (\n\n) or blank lines, so that when copied, the entire output pastes as a single, cohesive, tightly spaced text block while preserving the exact line breaks.`n"
-    . "3 Edge Contract & Risk Analysis=Please analyze this document or contract and provide a highly condensed review in Korean. First, identify the document type and characteristics. 1) B2B Commercial Transactions: Highlight payment terms, liability limits, termination, acceptance terms, and penalties. 2) Service Agreements (SLA): Focus on SOW, SLA targets, IP ownership, confidentiality, and performance penalties. 3) Tax/Transfer Pricing (TP/CIP/VAT): Focus on tax compliance risks, transfer pricing alignments, customs/declarations, and liabilities. 4) HR/Labor/General Legal: Focus on employment terms, non-competes, compliance with labor standards, and dispute resolution. Dynamically list critical risks (if any). Output Style: Extremely compact. Use only single newlines (\n) for line breaks. Never use double newlines (\n\n) or blank lines, so that when copied, the entire output pastes as a single, cohesive, tightly spaced text block while preserving the exact line breaks.`n`n"
+    . "1 Edge Active Page Analyzer=Please analyze the active document/page and provide a concise summary in Korean. First, identify the document type and characteristics (e.g., action-oriented task, informational report, legal/regulatory clause). Then, dynamically highlight approximately three key takeaways tailored to its type: if it requires action, outline the specific next steps; if it is for information, summarize the core concepts to understand; if it carries legal or compliance requirements, point out the essential obligations. Adapt the focus flexibly based on the document's nature. Output Style: Keep it extremely compact. Use only single newlines (\\n) for line breaks. Never use double newlines (\\n\\n) or blank lines between sections, so that when copied, the entire output pastes as a single, cohesive, tightly spaced text block while preserving the exact line breaks.`n"
+    . "2 Edge Terminology & Abbreviation Decoder=Analyze the active document and explain any industry-specific jargon, technical terms, or abbreviations in Korean with simple, clear definitions. Output Style: Extremely compact. Use only single newlines (\\n) for line breaks. Never use double newlines (\\n\\n) or blank lines, so that when copied, the entire output pastes as a single, cohesive, tightly spaced text block while preserving the exact line breaks.`n"
+    . "3 Edge Contract & Risk Analysis=Please analyze this document or contract and provide a highly condensed review in Korean. First, identify the document type and characteristics. 1) B2B Commercial Transactions: Highlight payment terms, liability limits, termination, acceptance terms, and penalties. 2) Service Agreements (SLA): Focus on SOW, SLA targets, IP ownership, confidentiality, and performance penalties. 3) Tax/Transfer Pricing (TP/CIP/VAT): Focus on tax compliance risks, transfer pricing alignments, customs/declarations, and liabilities. 4) HR/Labor/General Legal: Focus on employment terms, non-competes, compliance with labor standards, and dispute resolution. Dynamically list critical risks (if any). Output Style: Extremely compact. Use only single newlines (\\n) for line breaks. Never use double newlines (\\n\\n) or blank lines, so that when copied, the entire output pastes as a single, cohesive, tightly spaced text block while preserving the exact line breaks.`n`n"
     . "[Numpad3]`n"
-    . "1 AI C-Level Business Drafter=Act as a Top-Tier Management Consultant and Senior Executive Assistant. Draft a highly professional, persuasive, and diplomatically polite business email/proposal based on the following context: [목적 및 핵심 전달 사항 입력]. Structure it logically with a clear introduction, bulleted main points for readability, and a strong call-to-action (CTA). Ensure the tone is C-level appropriate, avoiding fluff. Output Style: Extremely compact. Use only single newlines (\n) for line breaks. Never use double newlines (\n\n) or blank lines, so that when copied, the entire output pastes as a single, cohesive, tightly spaced text block while preserving the exact line breaks.`n"
-    . "2 AI Report Synthesizer=Act as a Senior Business Analyst. Analyze the following raw data, meeting transcript, or complex report text: [방대한 데이터 또는 난해한 텍스트 입력]. Extract the signal from the noise and synthesize it into a structured Executive Summary. Provide: 1. Core Issue/Objective. 2. 3 Key Takeaways (Data-backed if possible). 3. Immediate Action Items (Who needs to do what). Output Style: Extremely compact. Use only single newlines (\n) for line breaks. Never use double newlines (\n\n) or blank lines, so that when copied, the entire output pastes as a single, cohesive, tightly spaced text block while preserving the exact line breaks.`n"
-    . "3 AI Strategy CSO Reviewer=Act as a sharp, experienced Chief Strategy Officer (CSO). Review the following draft proposal/idea: [기획안/아이디어 초안 입력]. I want ruthless but constructive feedback. 1. Identify logical gaps, weak arguments, or unaddressed risks. 2. Suggest specific, actionable improvements to make it bulletproof. 3. Provide an optimized, polished version of the core pitch. Output Style: Extremely compact. Use only single newlines (\n) for line breaks. Never use double newlines (\n\n) or blank lines, so that when copied, the entire output pastes as a single, cohesive, tightly spaced text block while preserving the exact line breaks.`n"
-    . "4 AI Corporate Translator=Act as an Expert Corporate Bilingual Translator. Translate the following text into [Target Language, default: Korean]: [번역할 텍스트 입력]. Do not translate literally word-for-word. Instead, capture the underlying business nuance, industry standard terminology, and professional tone. Elevate informal source text to a formal corporate standard. Provide only the translated result without conversational filler. Output Style: Extremely compact. Use only single newlines (\n) for line breaks. Never use double newlines (\n\n) or blank lines, so that when copied, the entire output pastes as a single, cohesive, tightly spaced text block while preserving the exact line breaks."
+    . "1 AI C-Level Business Drafter=Act as a Top-Tier Management Consultant and Senior Executive Assistant. Draft a highly professional, persuasive, and diplomatically polite business email/proposal based on the following context: [목적 및 핵심 전달 사항 입력]. Structure it logically with a clear introduction, bulleted main points for readability, and a strong call-to-action (CTA). Ensure the tone is C-level appropriate, avoiding fluff. Output Style: Extremely compact. Use only single newlines (\\n) for line breaks. Never use double newlines (\\n\\n) or blank lines, so that when copied, the entire output pastes as a single, cohesive, tightly spaced text block while preserving the exact line breaks.`n"
+    . "2 AI Report Synthesizer=Act as a Senior Business Analyst. Analyze the following raw data, meeting transcript, or complex report text: [방대한 데이터 또는 난해한 텍스트 입력]. Extract the signal from the noise and synthesize it into a structured Executive Summary. Provide: 1. Core Issue/Objective. 2. 3 Key Takeaways (Data-backed if possible). 3. Immediate Action Items (Who needs to do what). Output Style: Extremely compact. Use only single newlines (\\n) for line breaks. Never use double newlines (\\n\\n) or blank lines, so that when copied, the entire output pastes as a single, cohesive, tightly spaced text block while preserving the exact line breaks.`n"
+    . "3 AI Strategy CSO Reviewer=Act as a sharp, experienced Chief Strategy Officer (CSO). Review the following draft proposal/idea: [기획안/아이디어 초안 입력]. I want ruthless but constructive feedback. 1. Identify logical gaps, weak arguments, or unaddressed risks. 2. Suggest specific, actionable improvements to make it bulletproof. 3. Provide an optimized, polished version of the core pitch. Output Style: Extremely compact. Use only single newlines (\\n) for line breaks. Never use double newlines (\\n\\n) or blank lines, so that when copied, the entire output pastes as a single, cohesive, tightly spaced text block while preserving the exact line breaks.`n"
+    . "4 AI Corporate Translator=Act as an Expert Corporate Bilingual Translator. Translate the following text into [Target Language, default: Korean]: [번역할 텍스트 입력]. Do not translate literally word-for-word. Instead, capture the underlying business nuance, industry standard terminology, and professional tone. Elevate informal source text to a formal corporate standard. Provide only the translated result without conversational filler. Output Style: Extremely compact. Use only single newlines (\\n) for line breaks. Never use double newlines (\\n\\n) or blank lines, so that when copied, the entire output pastes as a single, cohesive, tightly spaced text block while preserving the exact line breaks."
 }
 
 GetDefaultHotstringData() {
@@ -1034,19 +1117,28 @@ GetDefaultHotstringData() {
     . "ItemCount=5`n"
     . "Item001Key=d.d`n"
     . "Item001Val=Δ`n"
-    . "Item002Key=+-`n"
+    ; Underscore-prefixed, like the Currency and Email groups. The obvious
+    ; spellings (+-, !=, >=, <=) cannot ship on by default because they are real
+    ; operators — "WHERE amount >= 1000" in SQL, or an Excel comparison, would be
+    ; silently replaced. Dotted forms are no good either: these fire after an
+    ; ending character, so "p.m" would trigger on "5:30 p.m." and "a.r" on
+    ; "A.R. Smith", which is worse in the business email this app is aimed at.
+    ; An underscore cannot begin inside a word.
+    . "Item002Key=_pm`n"
     . "Item002Val=±`n"
-    . "Item003Key=!=`n"
+    . "Item003Key=_ne`n"
     . "Item003Val=≠`n"
-    . "Item004Key=>=`n"
+    . "Item004Key=_ge`n"
     . "Item004Val=≥`n"
-    . "Item005Key=<=`n"
+    . "Item005Key=_le`n"
     . "Item005Val=≤`n`n"
     . "[Group003]`n"
     . "ItemCount=7`n"
-    . "Item001Key=>>`n"
+    ; ">>" and "<<" are shell redirection, bit shifts and markdown quoting, so
+    ; they cannot ship on by default either.
+    . "Item001Key=_ar`n"
     . "Item001Val=→`n"
-    . "Item002Key=<<`n"
+    . "Item002Key=_al`n"
     . "Item002Val=←`n"
     . "Item003Key=0++`n"
     . "Item003Val=↑`n"

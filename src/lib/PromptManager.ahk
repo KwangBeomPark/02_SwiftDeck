@@ -26,7 +26,8 @@ class PromptManager {
             return
 
         if (PromptManager.dataGroup.Length = 0) {
-            ToolTip("⚠️ No data for Group " . groupNum . "`n⚠️ Group " . groupNum . " 데이터가 없습니다.")
+            ; The rest of the UI is English; this one string was bilingual.
+            ToolTip("⚠️ Quick Prompt slot " . groupNum . " is empty`nAdd prompts in App Settings → Prompts")
             SetTimer(() => ToolTip(), -1000)
             return
         }
@@ -69,13 +70,13 @@ class PromptManager {
             if (HasSpecialKeys(msg)) {
                 ExecutePromptSequence(msg)
             } else {
-                if !TrySetPromptClipboard(msg,
+                ; Return without clearing the tooltip on failure: PastePromptText
+                ; has just shown the "clipboard is busy" warning, and the
+                ; ToolTip() below would wipe it in the same tick.
+                if !PastePromptText(msg,
                     PromptManager.dataGroup[PromptManager.selectedIndex].fontColor,
-                    PromptManager.dataGroup[PromptManager.selectedIndex].fontSize) {
-                    ReportClipboardBusy()
+                    PromptManager.dataGroup[PromptManager.selectedIndex].fontSize)
                     return
-                }
-                Send("^v")
             }
         }
         ToolTip()
