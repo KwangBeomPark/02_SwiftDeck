@@ -471,6 +471,17 @@ class HotstringManager {
                 return
             }
 
+            ; AutoHotkey refuses to register an abbreviation longer than this
+            ; (measured: 40 passes, 41 raises "max abbreviation length is 40").
+            ; Without the check the item saves, fails to register, and the
+            ; warning tooltip is immediately painted over by the success toast.
+            if (StrLen(triggerText) > 40) {
+                MsgBox("⚠️ The abbreviation is " . StrLen(triggerText) . " characters long."
+                    . "`n`nWindows hotstrings allow at most 40, so this one could be saved but "
+                    . "would never trigger. Please shorten it.", "Abbreviation Too Long", 262192)
+                return
+            }
+
             ; Refuse rather than report success for a write that would be dropped.
             if (!this.localData.Has(groupSection)) {
                 MsgBox("⚠️ Select a group first.`n`nUse the ⚙️ Groups button to create one, then add the abbreviation to it.",

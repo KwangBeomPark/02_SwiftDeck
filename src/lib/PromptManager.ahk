@@ -69,8 +69,12 @@ class PromptManager {
             if (HasSpecialKeys(msg)) {
                 ExecutePromptSequence(msg)
             } else {
-                SetStyledClipboard(msg, PromptManager.dataGroup[PromptManager.selectedIndex].fontColor, PromptManager.dataGroup[
-                    PromptManager.selectedIndex].fontSize)
+                if !TrySetPromptClipboard(msg,
+                    PromptManager.dataGroup[PromptManager.selectedIndex].fontColor,
+                    PromptManager.dataGroup[PromptManager.selectedIndex].fontSize) {
+                    ReportClipboardBusy()
+                    return
+                }
                 Send("^v")
             }
         }
@@ -274,6 +278,9 @@ class PromptManager {
                 translatedText := GoogleTranslate(srcText, targetLang)
                 if (translatedText != "")
                     edtMsg.Value := translatedText
+                else
+                    MsgBox("Translation failed.`n`nThe service could not be reached, or it returned"
+                        . " nothing usable. Your text was left unchanged.", "Translation Failed", 262160)
             } catch {
                 MsgBox("Translation failed.", "Error", 262160)
             }

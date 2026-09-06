@@ -82,6 +82,39 @@ AssertEqual(BuildQuotedCommand("explorer.exe", "C:\Users\me\AppData\Roaming\Swif
 AssertEqual(BuildQuotedCommand("explorer.exe /select,", "C:\a\b.txt", ""),
     'explorer.exe /select,"C:\a\b.txt"', "Reveal-file command takes no separator")
 
+; --- Key remap vs the app's own shortcuts ---
+; AutoHotkey keys a criterion-less hotkey by its string, so a remap on one of
+; these replaces the app's callback, and removing the remap later turns the
+; app's own shortcut off.
+defaultSettings := { MainHotkey: "F1", PromptModifier: "#", PromptUseNumpad: 1,
+    EmojiHotkey: "^#Space", ExitHotkey: "^#Escape" }
+
+AssertEqual(FindAppHotkeyConflict("F1", defaultSettings), "Favorites Menu", "F1 is reserved by the favorites menu")
+AssertEqual(FindAppHotkeyConflict("^F1", defaultSettings), "Add Current Explorer Folder",
+    "Ctrl+F1 is reserved by the add-folder shortcut")
+AssertEqual(FindAppHotkeyConflict("^#Space", defaultSettings), "Emoji & Symbols", "Emoji hotkey is reserved")
+AssertEqual(FindAppHotkeyConflict("^#Escape", defaultSettings), "Exit App", "Exit hotkey is reserved")
+AssertEqual(FindAppHotkeyConflict("+#Space", defaultSettings), "Prompt Popup Menu", "Prompt menu hotkey is reserved")
+AssertEqual(FindAppHotkeyConflict("#Numpad3", defaultSettings), "Quick Prompt 3", "Quick prompt slots are reserved")
+
+; A bare key is a different hotkey from the same key with modifiers.
+AssertEqual(FindAppHotkeyConflict("Space", defaultSettings), "", "Bare Space does not collide with Ctrl+Win+Space")
+AssertEqual(FindAppHotkeyConflict("CapsLock", defaultSettings), "", "An unused key is free to remap")
+AssertEqual(FindAppHotkeyConflict("F2", defaultSettings), "", "F2 is free with the default main hotkey")
+AssertEqual(FindAppHotkeyConflict("", defaultSettings), "", "An empty candidate never conflicts")
+
+; The reserved set follows the user's own hotkey choices.
+movedSettings := { MainHotkey: "F9", PromptModifier: "^", PromptUseNumpad: 0,
+    EmojiHotkey: "^#Space", ExitHotkey: "^#Escape" }
+AssertEqual(FindAppHotkeyConflict("F9", movedSettings), "Favorites Menu", "Reserved set follows a moved main hotkey")
+AssertEqual(FindAppHotkeyConflict("F1", movedSettings), "", "The old main hotkey is released")
+AssertEqual(FindAppHotkeyConflict("^5", movedSettings), "Quick Prompt 5", "Standard-number prompt slots are reserved")
+
+; Prompt slots disappear from the reserved set when prompt hotkeys are off.
+noPromptSettings := { MainHotkey: "F1", PromptModifier: "", PromptUseNumpad: 1,
+    EmojiHotkey: "^#Space", ExitHotkey: "^#Escape" }
+AssertEqual(FindAppHotkeyConflict("#Numpad3", noPromptSettings), "", "No prompt slots reserved when disabled")
+
 ; --- INI key safety ---
 ; User text becomes an INI key. Windows reads a leading "[" as a section header
 ; and a leading ";" as a comment, so such a name silently discards the entries

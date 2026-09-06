@@ -11,6 +11,22 @@
 ; Description: Displays application details, diagnostics, paths, and support links.
 ; Author: KBPark
 ; =================================================================================
+; A download that returned an error page (captive portal, proxy notice) is saved
+; with the right extension but is not a valid image, and Add("Picture") then
+; throws "Can't create control" — taking the whole App Information window with
+; it, on every open, until the file is deleted by hand. Drop the bad file so the
+; next open re-downloads it, and let the caller fall back.
+TryAddPicture(guiObj, options, imagePath) {
+    if !FileExist(imagePath)
+        return ""
+    try {
+        return guiObj.Add("Picture", options, imagePath)
+    } catch {
+        try FileDelete(imagePath)
+        return ""
+    }
+}
+
 ShowAppInformation(parentHwnd := 0) {
 
     bmcBtnPath := GetAppAssetPath("bmc_button.png")
@@ -55,10 +71,9 @@ ShowAppInformation(parentHwnd := 0) {
     infoGui.SetFont("s9 norm c" . THEME_MUTED, "Segoe UI")
     infoGui.Add("Text", "x20 y40 w350 h60 BackgroundTrans", "A business operations practitioner passionate about office automation and daily productivity.`n👉 Click the GitHub icon on the right to view other office apps!")
 
-    if FileExist(githubBtnPath) {
-        picGithub := infoGui.Add("Picture", "x380 y15 w64 h64 BackgroundTrans", githubBtnPath)
+    picGithub := TryAddPicture(infoGui, "x380 y15 w64 h64 BackgroundTrans", githubBtnPath)
+    if (picGithub)
         picGithub.OnEvent("Click", (*) => RunSafely("https://github.com/KwangBeomPark", "Open GitHub"))
-    }
     infoGui.SetFont("s10 norm c" . THEME_TEXT, "Segoe UI")
 
     CleanUpAndClose() {
@@ -157,8 +172,8 @@ ShowAppInformation(parentHwnd := 0) {
     infoGui.Add("GroupBox", "x20 y425 w440 h115 c" . THEME_ACCENT, "☕ Support the Developer")
     infoGui.Add("Text", "x35 y447 w410", "If this tool helps your daily workflow, consider buying a coffee!")
 
-    if FileExist(bmcBtnPath) {
-        picCoffee := infoGui.Add("Picture", "x130 y470 w217 h60 BackgroundTrans", bmcBtnPath)
+    picCoffee := TryAddPicture(infoGui, "x130 y470 w217 h60 BackgroundTrans", bmcBtnPath)
+    if (picCoffee) {
         picCoffee.OnEvent("Click", (*) => RunSafely("https://www.buymeacoffee.com/KBPark_Bob", "Open Support Page"))
     } else {
         infoGui.SetFont("s11 cBlack bold", "Segoe UI")

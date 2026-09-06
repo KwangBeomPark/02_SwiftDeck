@@ -247,7 +247,10 @@ IsDesktopWindowClass(winClass) {
     return (winClass == "Progman" || winClass == "WorkerW")
 }
 
-ValidateHotkeyAssignments(mainHotkey, promptModifier, promptUseNumpad, emojiHotkey, exitHotkey, promptMenuHotkey := "") {
+; Every shortcut SwiftDeck registers for itself, as { Name, Hotkey } pairs.
+; Shared by conflict validation and by the key-remap guard, so both always see
+; the same list.
+GetAppHotkeyAssignments(mainHotkey, promptModifier, promptUseNumpad, emojiHotkey, exitHotkey, promptMenuHotkey := "") {
     if (promptMenuHotkey == "")
         promptMenuHotkey := GetPromptMenuHotkey()
     assignments := [
@@ -265,6 +268,36 @@ ValidateHotkeyAssignments(mainHotkey, promptModifier, promptUseNumpad, emojiHotk
             assignments.Push({ Name: "Quick Prompt " . num, Hotkey: promptModifier . baseKey })
         }
     }
+    return assignments
+}
+
+; Returns the name of the app shortcut a candidate hotkey would collide with, or
+; "" when it is free. AutoHotkey keys a criterion-less hotkey by its string, so
+; registering a remap over one of these replaces the app's own callback — and
+; deleting that remap later calls Hotkey(key, "Off") on the app's shortcut,
+; silently killing it with no message.
+FindAppHotkeyConflict(candidateHotkey, settings) {
+    normalized := NormalizeHotkey(candidateHotkey)
+    if (normalized == "")
+        return ""
+
+    assignments := GetAppHotkeyAssignments(
+        settings.MainHotkey,
+        settings.PromptModifier,
+        settings.PromptUseNumpad,
+        settings.EmojiHotkey,
+        settings.ExitHotkey
+    )
+    for assignment in assignments {
+        if (NormalizeHotkey(assignment.Hotkey) == normalized)
+            return assignment.Name
+    }
+    return ""
+}
+
+ValidateHotkeyAssignments(mainHotkey, promptModifier, promptUseNumpad, emojiHotkey, exitHotkey, promptMenuHotkey := "") {
+    assignments := GetAppHotkeyAssignments(
+        mainHotkey, promptModifier, promptUseNumpad, emojiHotkey, exitHotkey, promptMenuHotkey)
 
     seen := Map()
     for assignment in assignments {
@@ -359,17 +392,23 @@ GoogleTranslate(text, targetLang := "ko") {
     
     try {
         req := ComObject("WinHttp.WinHttpRequest.5.1")
+        ; Without these the popup can stay disabled indefinitely: the request is
+        ; async and an argument-less WaitForResponse never gives up.
+        req.SetTimeouts(5000, 5000, 5000, 15000)
         req.Open("POST", url, true)
         req.SetRequestHeader("Content-Type", "application/x-www-form-urlencoded;charset=utf-8")
         req.Send(body)
-        req.WaitForResponse()
+        if !req.WaitForResponse(20)
+            return ""
         res := req.ResponseText
         
         outText := ""
         
         ; Google JSON format for GTX starts with [[[
+        ; "" means "no translation": returning the input text instead would be
+        ; indistinguishable from a successful no-op translation.
         if (SubStr(res, 1, 3) != "[[[")
-            return text
+            return ""
             
         pos := 3
         len := StrLen(res)
@@ -427,9 +466,9 @@ GoogleTranslate(text, targetLang := "ko") {
             }
         }
         
-        return (outText != "") ? outText : text
+        return outText
     } catch {
-        return text
+        return ""
     }
 }
 

@@ -99,7 +99,10 @@ _ExecutePromptFromMenu(groupNum, itemIdx, *) {
     if (HasSpecialKeys(msg)) {
         ExecutePromptSequence(msg)
     } else {
-        SetStyledClipboard(msg, "black", 11)
+        if !TrySetPromptClipboard(msg) {
+            ReportClipboardBusy()
+            return
+        }
         Send("^v")
     }
 }

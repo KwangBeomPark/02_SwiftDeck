@@ -3,6 +3,29 @@
 ; --- Clipboard Utilities (HTML & Plain Text) ---
 ; =============================================================================
 
+; Putting text on the clipboard can fail outright: another process — a clipboard
+; manager, an RDP session, Office — can hold it open. Try the styled format,
+; fall back to plain text, and report failure to the caller instead of letting a
+; busy clipboard surface as an unexpected-error dialog on a hotkey press.
+TrySetPromptClipboard(text, color := "black", sizePt := 11) {
+    try {
+        SetStyledClipboard(text, color, sizePt)
+        return true
+    }
+    try {
+        A_Clipboard := text
+        return true
+    }
+    return false
+}
+
+; Shared feedback for the paste paths, so a busy clipboard reads the same way
+; wherever it happens.
+ReportClipboardBusy() {
+    ToolTip("⚠️ The clipboard is busy — please try again")
+    SetTimer(() => ToolTip(), -2500)
+}
+
 SetStyledClipboard(text, color, sizePt) {
     htmlText := HtmlEncodeWithBr(text)  ; HTML-safe encoding + newlines → <br>
     frag :=
@@ -92,13 +115,15 @@ SetClipboardHtml(htmlFragment, plainText, sourceURL := "") {
     ; Set clipboard data
     hHTML := DllCall("RegisterClipboardFormat", "str", "HTML Format", "uint")
     CF_UNICODETEXT := 13
+    ; Clipboard managers routinely hold the clipboard for a moment after a copy,
+    ; so 150ms of retries was easy to lose a race against.
     opened := false
-    loop 5 {
+    loop 12 {
         if DllCall("OpenClipboard", "ptr", 0, "int") {
             opened := true
             break
         }
-        Sleep(30)
+        Sleep(40)
     }
     if !opened
         throw Error("OpenClipboard failed")

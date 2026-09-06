@@ -153,11 +153,18 @@ class KeyRemapManager {
     }
 
     RefreshList(targetIdx := 0) {
+        settings := ConfigGetFallbackAppSettings()
+        try settings := ConfigReadAppSettings()
+
         listData := []
         for obj in this.localData {
             friendlySrc := this.TranslateKeyToFriendly(obj.Src)
             friendlyDst := this.TranslateKeyToFriendly(obj.Dst)
-            listData.Push(friendlySrc . "  →  " . friendlyDst)
+            ; Entries saved before this collision was blocked are skipped at load
+            ; time; say so here rather than letting them look active.
+            appConflict := FindAppHotkeyConflict(obj.Src, settings)
+            suffix := (appConflict != "") ? "   [inactive — used by " . appConflict . "]" : ""
+            listData.Push(friendlySrc . "  →  " . friendlyDst . suffix)
         }
         this.lbItems.Delete()
         if (listData.Length > 0)
@@ -323,6 +330,19 @@ class KeyRemapManager {
                 return
             }
 
+            ; A remap must not target one of SwiftDeck's own shortcuts. Both
+            ; register the same criterion-less hotkey, so they overwrite each
+            ; other, and deleting the remap afterwards turns the app's shortcut
+            ; off for good — with no message and no obvious way back.
+            appConflict := FindAppHotkeyConflict(src, ConfigReadAppSettings())
+            if (appConflict != "") {
+                MsgBox("⚠️ '" . FormatHotkeyDisplay(src) . "' is already used by SwiftDeck itself: "
+                    . appConflict . ".`n`nRemapping it would disable that shortcut. "
+                    . "Pick a different key, or change the SwiftDeck shortcut in the General tab first.",
+                    "Key Reserved by SwiftDeck", 262160)
+                return
+            }
+
             ; Duplicate check
             for idx, item in this.localData {
                 if (isEdit && idx == editIdx)
@@ -412,8 +432,15 @@ LoadKeyRemaps() {
     if !ConfigExists("KeyRemaps")
         return
 
+    ; A settings file written before this was blocked can still hold a remap that
+    ; collides with one of SwiftDeck's own shortcuts. Registering it would
+    ; overwrite that shortcut, and the "Off" sweep above would later disable the
+    ; app's own hotkey, so skip those entirely.
+    settings := ConfigGetFallbackAppSettings()
+    try settings := ConfigReadAppSettings()
+
     for item in ConfigReadKeyRemaps() {
-        if (item.Src != "" && item.Dst != "") {
+        if (item.Src != "" && item.Dst != "" && FindAppHotkeyConflict(item.Src, settings) == "") {
             try {
                 if IsMouseButton(item.Dst) {
                     Hotkey(item.Src, RemapMouseDownHandler.Bind(item.Dst))
