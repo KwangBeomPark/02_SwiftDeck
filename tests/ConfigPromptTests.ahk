@@ -39,7 +39,13 @@ Check(cond, label) {
 
 Report(err, mode) {
     Log("UNCAUGHT " . Type(err) . ": " . err.Message . " @ " . err.File . ":" . err.Line)
+    ; Also to stdout, so the build gate shows the reason instead of just a code.
+    FileAppend("FAIL  ConfigPrompt: " . err.Message . "`n", "*")
     ExitApp(3)
+}
+
+Filler(n) {
+    return StrReplace(Format("{:" . n . "}", ""), " ", "x")
 }
 
 Visible(text) {
@@ -159,6 +165,27 @@ Run_() {
     ; Encoding doubles those backslashes, so the stored form is what must fit.
     Check(StrLen(ConfigEncodePromptText(heavy)) == 40000, "Encoding doubles every backslash")
 
+    ; Two separate ceilings apply: one prompt cannot exceed the per-value limit,
+    ; and the whole slot cannot exceed the section limit. Prompts that are each
+    ; individually legal can still overflow the slot together, which is the case
+    ; a per-prompt check alone would let through.
+    valueLimit := ConfigGetMaxValueLength()
+    Check(ConfigCheckPromptSlotLimit([{ Title: "Big", Msg: Filler(valueLimit - 100) }]) == "",
+        "A prompt just under the per-prompt limit is accepted")
+    Check(ConfigCheckPromptSlotLimit([{ Title: "Huge", Msg: Filler(valueLimit + 500) }]) != "",
+        "A single over-long prompt is refused")
+
+    stacked := []
+    loop 3
+        stacked.Push({ Title: "P" . A_Index, Msg: Filler(valueLimit - 1000) })
+    Check(ConfigCheckPromptSlotLimit(stacked) != "",
+        "Individually legal prompts that together overflow the slot are refused")
+
+    many := []
+    loop 40
+        many.Push({ Title: "P" . A_Index, Msg: Filler(2000) })
+    Check(ConfigCheckPromptSlotLimit(many) != "", "Many medium prompts also hit the slot limit")
+
     ; --- A rejected save must leave the file exactly as it was ---
     Fresh()
     good := ConfigReadPromptData()
@@ -183,5 +210,9 @@ Run_() {
     try DirDelete(g_targetFolder, true)
     Log("")
     Log(g_failures ? ("RESULT: " . g_failures . " FAILURE(S)") : "RESULT: prompt encoding holds")
+    if (g_failures)
+        FileAppend("FAIL  ConfigPrompt: " . g_failures . " failure(s); see " . g_out . "`n", "*")
+    else
+        FileAppend("ok    ConfigPrompt`n", "*")
     ExitApp(g_failures ? 1 : 0)
 }

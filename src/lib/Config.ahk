@@ -316,7 +316,12 @@ ConfigWriteTextFileSafely(targetPath, content, encoding := "UTF-16") {
             if FileExist(tempPath)
                 FileDelete(tempPath)
             FileAppend(content, tempPath, encoding)
-            if FileExist(targetPath)
+            ; Snapshot the target once and reuse it. Minting a fresh copy on each
+            ; retry overwrote this variable, so only the last one was ever
+            ; cleaned up — measured: two orphaned .rollback files left in the
+            ; settings folder for every save that a sync client or scanner
+            ; blocked, accumulating with no upper bound.
+            if (rollbackPath == "" && FileExist(targetPath))
                 rollbackPath := ConfigCreateRollbackCopy(targetPath)
             FileMove(tempPath, targetPath, true)
             ; Success — clean up and return
@@ -753,6 +758,41 @@ ConfigWritePromptData(promptData) {
     }
 }
 
+; The measured point where storage stops working: 32,767 encoded characters read
+; back intact, 32,768 makes the whole entry disappear, and 33,000 comes back as
+; 232 characters — Windows wraps rather than truncating, and the next save writes
+; the remnant.
+ConfigGetHotstringValueCeiling() {
+    return 32767
+}
+
+; What the editor asks of new text: the same conservative limit prompts use, so
+; there is headroom rather than a value sitting one character from the cliff.
+; Length is measured after encoding, because that is what gets stored — every
+; line break costs 6 characters as %0D%0A, so a pasted block well under the raw
+; limit can still cross it.
+ConfigCheckHotstringValueLimit(text) {
+    encodedLength := StrLen(HotstringEncodeIniValue(text))
+    if (encodedLength <= ConfigGetMaxValueLength())
+        return ""
+    return "This replacement text is " . encodedLength . " characters once stored, over the "
+        . ConfigGetMaxValueLength() . " character limit.`n`n"
+        . "Windows cannot store a settings value that large, and saving it would "
+        . "discard this entry entirely. Please shorten it."
+}
+
+; What the writer refuses. This is the hard ceiling, not the editor's limit: an
+; entry saved by an earlier build can sit between the two, and it still stores
+; and reads back correctly — refusing it here would lock that user out of saving
+; any hotstring change at all.
+ConfigCheckHotstringValueStorable(text) {
+    encodedLength := StrLen(HotstringEncodeIniValue(text))
+    if (encodedLength <= ConfigGetHotstringValueCeiling())
+        return ""
+    return "This replacement text is " . encodedLength . " characters once stored, over the "
+        . ConfigGetHotstringValueCeiling() . " characters Windows can hold in one settings value."
+}
+
 ConfigReadHotstringData() {
     schemaVer := ConfigReadValue("Hotstrings", "Meta", "SchemaVersion", "1")
     if (schemaVer == "4")
@@ -859,6 +899,18 @@ ConfigReadHotstringDataLegacy() {
 }
 
 ConfigWriteHotstringData(localData, groupOrder) {
+    ; Check every item before the file is touched, so an over-long entry is
+    ; refused outright instead of being written and read back mangled.
+    for groupSection in groupOrder {
+        if !localData.Has(groupSection)
+            continue
+        for item in localData[groupSection] {
+            reason := ConfigCheckHotstringValueStorable(Trim(item.Val))
+            if (reason != "")
+                throw Error("Hotstring '" . Trim(item.Key) . "': " . reason)
+        }
+    }
+
     configPath := GetConfigPath("Hotstrings")
     fullRollbackPath := ConfigCreateRollbackCopy(configPath)
 
@@ -965,16 +1017,29 @@ HotstringGetRuntimeGroupName(groupSection) {
     return groupSection
 }
 
+; Hotstring values are read back one key at a time, and Windows strips a matched
+; surrounding pair of quotes — double or single — from a key-mode read. Measured:
+; "As discussed" comes back as As discussed and '확인' as 확인, and the next save
+; then writes the stripped text, so the quotes are gone for good. A quote inside
+; the text (say "hi" now, it's fine) is untouched, and only this codec is
+; exposed: folders, prompts and key remaps are read in section mode, which
+; returns the raw line.
+; "%" is encoded first, so no escape sequence here can be produced by accident.
 HotstringEncodeIniValue(value) {
     value := StrReplace(value, "%", "%25")
+    value := StrReplace(value, '"', "%22")
+    value := StrReplace(value, "'", "%27")
     value := StrReplace(value, "`r", "%0D")
     value := StrReplace(value, "`n", "%0A")
     return value
 }
 
+; Mirror image: "%25" must be decoded last, or it would revive the escapes above.
 HotstringDecodeIniValue(value) {
     value := StrReplace(value, "%0D", "`r")
     value := StrReplace(value, "%0A", "`n")
+    value := StrReplace(value, "%22", '"')
+    value := StrReplace(value, "%27", "'")
     value := StrReplace(value, "%25", "%")
     return value
 }

@@ -487,6 +487,14 @@ class HotstringManager {
                 return
             }
 
+            ; Long replacement text is refused for the same reason: saving it
+            ; would drop the entry rather than fail loudly.
+            lengthWarning := ConfigCheckHotstringValueLimit(replacementText)
+            if (lengthWarning != "") {
+                MsgBox("⚠️ " . lengthWarning, "Replacement Text Too Long", 262192)
+                return
+            }
+
             ; Refuse rather than report success for a write that would be dropped.
             if (!this.localData.Has(groupSection)) {
                 MsgBox("⚠️ Select a group first.`n`nUse the ⚙️ Groups button to create one, then add the abbreviation to it.",

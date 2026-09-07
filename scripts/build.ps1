@@ -50,7 +50,11 @@ function Invoke-TestSuite {
         # failures.
         $psi = New-Object System.Diagnostics.ProcessStartInfo
         $psi.FileName = $Interpreter
-        $psi.Arguments = "`"$($script.FullName)`""
+        # /ErrorStdOut sends a load-time error (a syntax error in the test or in
+        # anything it includes) to stdout instead of a modal dialog. Without it
+        # such a script just sits on the dialog until the timeout, reporting a
+        # hang rather than the line number.
+        $psi.Arguments = "/ErrorStdOut `"$($script.FullName)`""
         $psi.WorkingDirectory = $TestsDir
         $psi.RedirectStandardOutput = $true
         $psi.RedirectStandardError = $true
