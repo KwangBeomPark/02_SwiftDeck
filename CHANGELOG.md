@@ -1,6 +1,27 @@
 # Changelog
 
-## 1.3.2 — 2026-09-06
+## 1.3.2 — 2026-09-07
+
+### Release summary (English)
+
+A maintenance release focused on things that failed quietly. The detailed notes below are in Korean; this is what changed.
+
+**Settings that were being lost.** Several kinds of ordinary input were discarded without any error message, and in each case the loss became permanent on the next save:
+
+- A favourite or prompt named starting with `[` or `;` deleted the entries after it, because Windows reads those as settings-file syntax. Measured: naming the second of four favourites `[Draft] Reply` silently dropped three of them.
+- A hotstring replacement wrapped in quotes — `"As discussed"`, `'확인'` — came back without them, because Windows strips a surrounding quote pair when reading a settings value. A replacement of `''` lost the entry entirely.
+- A hotstring replacement longer than about 32,000 stored characters made the entry vanish outright rather than being truncated.
+- A prompt slot larger than Windows can read back returned empty, discarding every prompt in it.
+- A single corrupted `.bak` used to be the only backup, so one restart after a problem overwrote the copy that could have fixed it. Releases now keep five dated generations.
+
+**Errors that reached the user raw.** `Ctrl+F1` in Explorer raised a COM error; an unhandled error showed an AutoHotkey dialog with source paths in it; a failure while loading settings could leave the app running with no tray icon, so it could not even be closed. Startup now degrades a feature at a time and always installs the tray icon.
+
+**Things that did not display or open correctly.** Folders with `&` in the name showed as `RD` instead of `R&D` and were refused outright by a shell-injection check that could never have applied. Two favourites with the same name collapsed into one. Settings and manual windows were cut off below the screen edge at high display scaling, putting Factory Reset and Backup permanently out of reach.
+
+**Additions.** A built-in symbol set for the Emoji menu (arrows, currency, maths, marks, checks, brackets), editable Emoji and Exit hotkeys in the General tab, and version-stamped release assets (`SwiftDeck.v1.3.2.exe`).
+
+**Verifying this release.** It is not code-signed yet. Every release now publishes `SHA256SUMS.txt` with a digest for each asset — see [What Windows Will Say](README.md#-what-windows-will-say) for how Windows reacts and what to do about Smart App Control.
+
 
 ### Add Current Folder 오류 수정
 

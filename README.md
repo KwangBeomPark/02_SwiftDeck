@@ -44,6 +44,35 @@ It is designed especially for finance, sales administration, accounting, credit 
 
 If no release file is available yet, please build or run `src/SwiftDeck.ahk` using AutoHotkey v2.
 
+### 🛡️ What Windows Will Say
+
+SwiftDeck releases are **not code-signed yet**, so Windows treats the download as a program it has never seen. What you get depends on which protection is active on your machine:
+
+| Protection | What happens | What to do |
+| --- | --- | --- |
+| **SmartScreen** | A blue "Windows protected your PC" dialog | Click **More info**, then **Run anyway** |
+| **Smart App Control** | The app is **blocked outright** — no dialog to click through | See below |
+| **Antivirus or company policy** | May quarantine the file or block it silently | Ask your IT team to allow it |
+
+**Smart App Control** is the one that stops you completely. It is on by default on clean Windows 11 installs, it enforces below the desktop rather than warning you, and it refuses any unsigned program that has no established reputation. Check it under **Windows Security → App & browser control → Smart App Control**. If it says **On**:
+
+- **Run from source instead** — install [AutoHotkey v2](https://www.autohotkey.com/) and run `src/SwiftDeck.ahk`. The AutoHotkey interpreter is signed, so this path works with Smart App Control left on. This is the recommended option on a work machine.
+- Turning Smart App Control off also works, but it is a **one-way change**: Windows cannot switch it back on without reinstalling the operating system. Do not do this on a machine you do not own.
+
+Signing is planned once an open-source code-signing certificate is in place. Note that signing alone does not remove the SmartScreen prompt immediately — reputation builds up over downloads — so the source-run option above stays the reliable one for locked-down environments.
+
+### 🔍 Verifying Your Download
+
+An unsigned download is exactly the case where you cannot tell the real file from one that was swapped in transit, so every release ships a `SHA256SUMS.txt` asset listing a digest for each file. Compare it with what you downloaded:
+
+```powershell
+Get-FileHash .\SwiftDeck.v1.3.2.exe -Algorithm SHA256
+```
+
+The printed hash must match the line for that filename in `SHA256SUMS.txt`. If it does not, delete the file and download it again.
+
+`SwiftDeck.exe` and `SwiftDeck.vX.Y.Z.exe` are byte-identical copies of the same build — the fixed name exists only so that the updater in v1.3.1 and earlier keeps working — so their digests are the same by design.
+
 ### 🔄 Automatic Updates
 
 SwiftDeck checks the latest public GitHub Release after startup at most once every 24 hours. When a newer release is available, **App Settings** shows `New version vX available` in its header and the header's **Update to vX** button starts the verified update directly. **App Information** and the tray menu's **Check for Updates** remain available for manual checks. The updater downloads the release binary beside the currently running app, verifies its SHA-256 digest against `SwiftDeck.update.ini`, safely replaces the executable, and restarts SwiftDeck. It prefers the version-stamped asset and falls back to `SwiftDeck.exe`. The running file keeps its own name, so an executable you renamed stays renamed after an update. Saved settings in `%AppData%\SwiftDeck` are not replaced. Source mode and read-only folders remain manual-update only.
@@ -149,7 +178,8 @@ For team deployment, one manager can configure common folder paths, prompts, and
 - When the built-in translation feature is used, the selected text is sent to Google's public translation endpoint for that request.
 - If bundled support images are missing, the app may download public UI assets such as the Buy Me a Coffee button or GitHub favicon.
 - All folder paths, prompts, hotstrings, and key remap settings are stored in local `.ini` files only.
-- **Shell injection protection**: Folder paths are validated before execution — characters such as `&`, `|`, `>`, and `<` that could chain OS commands are blocked automatically.
+- **Folder paths are validated before they are opened**: SwiftDeck checks that the target exists and is a directory, and passes it as a quoted argument. It does not go through a command shell, so characters such as `&`, `|`, `>` and `<` in a folder name cannot chain commands — which is also why a normal folder like `Sales & Marketing` opens correctly rather than being refused.
+- **Releases are not code-signed yet**, and each one publishes a `SHA256SUMS.txt` so you can verify a download. See [What Windows Will Say](#-what-windows-will-say).
 - Avoid storing passwords, API keys, personal credentials, or highly confidential information in Prompt or Hotstring settings.
 - Review shared `.ini` files carefully before distributing them to other users.
 

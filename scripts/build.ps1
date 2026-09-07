@@ -2,7 +2,7 @@ param(
     [switch]$Publish,
 
     # Skips the test gate. For getting an emergency build out when a test is
-    # itself broken — not for ignoring a real failure.
+    # itself broken -- not for ignoring a real failure.
     [switch]$SkipTests,
 
     # Authenticode signing. Import the certificate into your personal
@@ -20,11 +20,17 @@ param(
 
 # SwiftDeck build, packaging, and optional GitHub Release publishing pipeline.
 # Publishing is opt-in so a local build can never modify GitHub by accident.
+#
+# Keep this file pure ASCII. It has no BOM, so Windows PowerShell 5.1 reads it in
+# the system ANSI codepage: a UTF-8 em dash arrives as bytes that end in a smart
+# closing quote, which inside a string literal terminates it early and stops the
+# whole script from parsing. Measured -- one em dash in a release-notes string
+# made build.ps1 fail to parse in its entirety.
 $ErrorActionPreference = "Stop"
 
 # Runs every tests\*Tests.ahk and fails the build if any of them does. Each
 # script exits non-zero on a failed assertion, and a load-time error leaves the
-# process sitting on a modal dialog — which is why there is a timeout rather
+# process sitting on a modal dialog -- which is why there is a timeout rather
 # than an open-ended wait.
 function Invoke-TestSuite {
     param(
@@ -42,7 +48,7 @@ function Invoke-TestSuite {
     $failed = @()
     foreach ($script in $scripts) {
         # Driven through .NET rather than Start-Process for two reasons. Output
-        # has to be redirected at all — AutoHotkey is a GUI-subsystem program
+        # has to be redirected at all -- AutoHotkey is a GUI-subsystem program
         # with no console, so the harness writing its result to stdout blocks
         # forever otherwise, and a failed assertion looks like a hang instead of
         # naming itself. And Start-Process -PassThru does not reliably surface
@@ -197,6 +203,7 @@ try {
     $releaseZip = Join-Path $releaseDir "$versionedName.zip"
     $compatExe = Join-Path $releaseDir "SwiftDeck.exe"
     $releaseManifest = Join-Path $releaseDir "SwiftDeck.update.ini"
+    $releaseChecksums = Join-Path $releaseDir "SHA256SUMS.txt"
     $localVersionedExe = Join-Path $distDir "$versionedName.exe"
     # SwiftDeck.zip was the pre-v1.3.2 archive name and is no longer produced;
     # clearing it keeps release/ from mixing versions when it is uploaded.
@@ -219,7 +226,7 @@ try {
     }
 
     # Order matters. Signing rewrites the executable, so it has to happen before
-    # the copies are taken and before the SHA-256 goes into the manifest —
+    # the copies are taken and before the SHA-256 goes into the manifest --
     # otherwise the updater would verify a digest of the unsigned bytes and
     # reject every download.
     if ($signingCertificate) {
@@ -227,7 +234,13 @@ try {
         Invoke-ArtifactSigning -Paths @($releaseExe) -Certificate $signingCertificate -TimestampUrl $TimestampUrl
     }
     elseif ($Publish) {
-        Write-Warning "Publishing an UNSIGNED release. SmartScreen will warn users on first run."
+        # Not just a SmartScreen warning. Smart App Control, which is on by
+        # default on clean Windows 11 installs, refuses to run an unsigned binary
+        # with no reputation at all -- measured on this machine: the freshly built
+        # exe was blocked outright (Event 3077) while an older copy still ran.
+        # A user in that state cannot click through; they have to turn the
+        # feature off, which is one-way, or run from source.
+        Write-Warning "Publishing an UNSIGNED release. SmartScreen will warn on first run, and Smart App Control will block it outright where it is enabled."
     }
 
     Compress-Archive -LiteralPath $releaseExe -DestinationPath $releaseZip -CompressionLevel Optimal
@@ -270,10 +283,26 @@ try {
         throw "Signature state differs between the two executables: $($signature.Status) vs $($compatSignature.Status)."
     }
 
+    # A digest for every published asset, not just the executable the updater
+    # checks. An unsigned download is exactly the case where a user has no way to
+    # tell the file apart from something that replaced it in transit, so the
+    # checksums have to cover the .zip as well and ship as their own asset.
+    # Written as plain "<hash>  <name>" lines with no header and no BOM, so the
+    # file is usable as-is by both Get-FileHash comparison and "sha256sum -c".
+    # Set-Content -Encoding utf8 writes a BOM on Windows PowerShell 5.1, which
+    # would corrupt the first line for the latter; the content is ASCII anyway.
+    $checksumTargets = Get-Item -LiteralPath $releaseExe, $releaseZip, $compatExe
+    $checksumLines = $checksumTargets | ForEach-Object {
+        "{0}  {1}" -f (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToUpperInvariant(), $_.Name
+    }
+    Set-Content -LiteralPath $releaseChecksums -Value $checksumLines -Encoding ascii
+
     Write-Host "Build completed:"
-    Get-Item -LiteralPath $releaseExe, $releaseZip, $compatExe, $releaseManifest, $localVersionedExe |
+    Get-Item -LiteralPath $releaseExe, $releaseZip, $compatExe, $releaseManifest, $releaseChecksums, $localVersionedExe |
         Select-Object FullName, Length
     Write-Host "SHA256: $releaseHash"
+    Write-Host "Checksums for the release body:"
+    Get-Content -LiteralPath $releaseChecksums | ForEach-Object { Write-Host "  $_" }
     if ($signature.Status -eq "Valid") {
         Write-Host ("Signature: Valid - {0}" -f $signature.SignerCertificate.Subject)
     } else {
@@ -303,10 +332,45 @@ try {
             throw "Local main and origin/main must match before publishing."
         }
 
-        & gh release create "v$version" $releaseExe $releaseZip $compatExe $releaseManifest `
+        & gh release create "v$version" $releaseExe $releaseZip $compatExe $releaseManifest $releaseChecksums `
             --draft --target main --title "SwiftDeck v$version" --generate-notes
         if ($LASTEXITCODE -ne 0) {
             throw "Could not create the draft GitHub Release."
+        }
+
+        # Put the digests in the body as well as in the asset. Someone deciding
+        # whether to trust an unsigned download should not have to open a second
+        # file to find out what it should hash to. Appended to the generated
+        # notes rather than replacing them, and never fatal: a release with the
+        # right binaries and plain notes is still a good release, and it is
+        # already a draft the author can edit.
+        $generatedNotes = & gh release view "v$version" --json body -q .body
+        if ($LASTEXITCODE -eq 0) {
+            $digestBlock = (Get-Content -LiteralPath $releaseChecksums) -join "`n"
+            $signingNote = if ($signature.Status -eq "Valid") {
+                "This build is code-signed."
+            } else {
+                "This build is **not code-signed**. Smart App Control blocks unsigned programs outright rather than warning -- see [What Windows Will Say](https://github.com/KwangBeomPark/02_SwiftDeck#-what-windows-will-say)."
+            }
+            $notes = @(
+                $generatedNotes,
+                "",
+                "## Verifying this download",
+                "",
+                $signingNote,
+                "",
+                "``````",
+                $digestBlock,
+                "``````",
+                "",
+                "Check a file with ``Get-FileHash .\<file> -Algorithm SHA256``. ``SwiftDeck.exe`` is a byte-identical copy of the version-stamped executable, kept for the updater in v1.3.1 and earlier."
+            ) -join "`n"
+            & gh release edit "v$version" --notes $notes
+            if ($LASTEXITCODE -ne 0) {
+                Write-Warning "Could not add the checksum block to the release notes; the SHA256SUMS.txt asset is still attached."
+            }
+        } else {
+            Write-Warning "Could not read the generated release notes; skipping the checksum block."
         }
 
         & gh release edit "v$version" --draft=false --latest
