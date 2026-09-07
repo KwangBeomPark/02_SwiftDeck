@@ -523,7 +523,14 @@ ExecutePromptSequence(msg) {
                 pos := msgLen + 1
             }
             if (plainText != "") {
-                A_Clipboard := plainText
+                ; Same guarded write the plain paste path uses. A raw
+                ; "A_Clipboard :=" throws while a clipboard manager, RDP session
+                ; or Office has the clipboard open, and here that would surface
+                ; halfway through a key sequence, with part of it already sent.
+                if !TrySetPromptClipboard(plainText) {
+                    ReportClipboardBusy()
+                    return
+                }
                 ClipWait(1)
                 Send("^v")
                 Sleep(PASTE_DELAY)

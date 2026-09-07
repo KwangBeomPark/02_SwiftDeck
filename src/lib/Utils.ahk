@@ -365,6 +365,43 @@ IsModifierSymbolKey(baseKey) {
     return (baseKey == "^" || baseKey == "+" || baseKey == "#" || baseKey == "!" || baseKey == "&")
 }
 
+; Base keys that take over something the user needs for ordinary work when they
+; are bound with no modifier at all: every mouse click, or typing itself.
+;
+; Binding the favorites menu to a bare LButton swallows every left click in
+; Windows — the tray icon, the menu that just opened, and the Save button that
+; would undo it all stop responding, and the only way back is Task Manager plus
+; a hand edit of the settings file. A bare letter, digit, Space, Enter or Tab
+; does the same to the keyboard.
+;
+; This is deliberately not "require a modifier for everything": F1 is the
+; shipped default and is perfectly safe on its own, as are the other function
+; keys and Escape.
+HotkeyBaseKeyNeedsModifier(baseKey) {
+    static blocked := Map(
+        "LButton", true, "RButton", true, "MButton", true,
+        "XButton1", true, "XButton2", true,
+        "WheelUp", true, "WheelDown", true, "WheelLeft", true, "WheelRight", true,
+        "Space", true, "Enter", true, "Tab", true, "Backspace", true)
+
+    trimmed := Trim(baseKey)
+    if (trimmed == "")
+        return false
+    if blocked.Has(trimmed)
+        return true
+    ; A single character is a letter or a digit, i.e. a key used for typing.
+    return (StrLen(trimmed) == 1)
+}
+
+; The one place that explains the rule, so the editor and the startup fallback
+; say the same thing.
+GetHotkeyModifierRuleMessage(baseKey) {
+    return "'" . baseKey . "' on its own would take over that key everywhere in Windows.`n`n"
+        . "A mouse button or a typing key needs at least one of Ctrl, Shift, Win or Alt, "
+        . "or clicking and typing would stop working outside SwiftDeck.`n`n"
+        . "Function keys such as F1 can be used on their own."
+}
+
 ; A hotkey shown inside a menu label still comes from the settings file, so it
 ; needs the same treatment as any other user text: "&" escaped, and clipped so a
 ; hand-edited value cannot push the label past what Menu.Add accepts. Exceeding

@@ -28,6 +28,7 @@ OnError(Report)
 SetTimer(Run_, -200)
 
 #Include ..\src\lib\Config.ahk
+#Include ..\src\lib\Migration.ahk
 
 Log(line) {
     FileAppend(line . "`n", g_out, "UTF-8")
@@ -245,6 +246,47 @@ Run_() {
         breaks .= "line" . A_Index . "`r`n"
     Check(StrLen(HotstringEncodeIniValue(breaks)) > StrLen(breaks),
         "Encoding expands line breaks, so the stored form is what must fit")
+
+    ; ---------- Migration must never rewrite what it could not read ----------
+    Fresh()
+    Log("")
+    Log("--- Hotstring migration safety ---")
+    shipped := ConfigCountHotstringItems(ConfigReadHotstringData())
+    Check(shipped > 0, "The shipped defaults contain hotstrings to lose")
+
+    ; A hand edit that drops the schema marker. App Info offers to open this very
+    ; file, and settings files get shared between machines, so this is reachable.
+    text := FileRead(g_filePath_Hotstring, "UTF-16")
+    ConfigWriteTextFileSafely(g_filePath_Hotstring, StrReplace(text, "SchemaVersion=4", ""), "UTF-16")
+    Check(ConfigCountHotstringItems(ConfigReadHotstringData()) == 0,
+        "Without the marker the legacy reader understands none of it")
+
+    MigrateHotstringIni()
+    after := ConfigCountHotstringItems(ConfigReadHotstringData())
+    Check(after == shipped, "Migration restores the marker instead of wiping the file")
+    if (after != shipped)
+        Log("        had " . shipped . " hotstrings, now " . after)
+
+    ; A file neither reader understands must be left alone and reported, not
+    ; replaced with an empty default.
+    Fresh()
+    ConfigWriteTextFileSafely(g_filePath_Hotstring, "[SomethingElse]`nkey=value`n", "UTF-16")
+    reported := false
+    try MigrateHotstringIni()
+    catch
+        reported := true
+    Check(reported, "An unrecognised hotstring file is reported rather than migrated")
+    Check(InStr(FileRead(g_filePath_Hotstring, "UTF-16"), "SomethingElse") > 0,
+        "An unrecognised hotstring file is left on disk untouched")
+
+    ; An genuinely empty file is not an error - there is nothing to lose.
+    Fresh()
+    ConfigWriteTextFileSafely(g_filePath_Hotstring, "[Meta]`nSchemaVersion=1`n", "UTF-16")
+    quiet := true
+    try MigrateHotstringIni()
+    catch
+        quiet := false
+    Check(quiet, "An empty hotstring file migrates without complaint")
 
     ; ---------- Safe write ----------
     Fresh()

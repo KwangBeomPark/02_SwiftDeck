@@ -87,6 +87,13 @@ function Invoke-TestSuite {
             }
             $detail = if ($output) { $output -replace "`n", " / " } else { "exit $($proc.ExitCode)" }
             $failed += "$($script.Name): $detail"
+        } elseif ($output -notmatch '(?m)^ok\s+\S') {
+            # Exit code 0 alone is not proof that anything ran. A script that
+            # returns early, or ends without reaching its assertions, exits 0 and
+            # would be reported as passing. Every suite ends by printing
+            # "ok <name>", so require that line as the actual pass signal.
+            Write-Host ("  {0,-28} NO RESULT" -f $script.Name)
+            $failed += "$($script.Name): exited 0 without reporting a result (expected an 'ok <suite>' line)"
         } else {
             Write-Host ("  {0,-28} ok" -f $script.Name)
         }

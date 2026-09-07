@@ -1044,6 +1044,31 @@ HotstringDecodeIniValue(value) {
     return value
 }
 
+; How many hotstrings a read actually produced, across every group.
+ConfigCountHotstringItems(hotstringData) {
+    total := 0
+    for groupSection in hotstringData.GroupOrder {
+        if hotstringData.Data.Has(groupSection)
+            total += hotstringData.Data[groupSection].Length
+    }
+    return total
+}
+
+; Whether a settings file holds anything beyond its bookkeeping section. Used to
+; tell "this file is empty" apart from "this file has content nothing could
+; read", which are the same to a reader but opposite when deciding to overwrite.
+ConfigHasContentSections(configName) {
+    sections := ConfigReadSections(configName)
+    if (sections == "")
+        return false
+    loop parse, sections, "`n", "`r" {
+        name := Trim(A_LoopField)
+        if (name != "" && name != "Meta")
+            return true
+    }
+    return false
+}
+
 ConfigCountHotstrings() {
     counts := { Space: 0, Menu: 0, Total: 0 }
     hotstringData := ConfigReadHotstringData()

@@ -105,8 +105,11 @@ Before publishing, exercise the self-update path against the previous release:
 
 ```text
 src/      Source entry point and AutoHotkey library files
+tests/    Test suites; scripts/build.ps1 runs every tests/*Tests.ahk and fails the build on any failure
+scripts/  Build, packaging, signing, and optional release publishing
 assets/   Public images, icons, and README media
-dist/     Local release artifacts such as .exe and .zip files, excluded from Git
+dist/     Local build output (.exe only), excluded from Git
+release/  Assets for upload: versioned .exe and .zip, SwiftDeck.exe, SwiftDeck.update.ini, SHA256SUMS.txt; excluded from Git
 ```
 
 Release binaries should be uploaded to GitHub Releases, not committed to the repository body.
@@ -167,6 +170,8 @@ The same actions are available in **App Settings → General → Data, Startup &
 - **Backup Saved** backs up the configuration currently stored on disk. If General shows pending changes, apply them first.
 - **Restore** confirms before replacing the current configuration and then reloads SwiftDeck.
 - **Factory Reset** preserves backups but replaces active settings with defaults after confirmation.
+
+**If Restore is not enough.** SwiftDeck refreshes `Backups\<file>.bak` every time it starts, so if a problem is only noticed after a restart, that copy already reflects the problem. Before overwriting it, the previous `.bak` is kept as `Backups\<file>.bak.YYYYMMDD`, one per day and five days in total. **Restore** only uses the plain `.bak`; to go further back, open the settings folder, copy the dated file you want over the matching `.ini` with SwiftDeck closed, and start it again.
 
 For team deployment, one manager can configure common folder paths, prompts, and hotstrings first, then share the generated `.ini` files with colleagues. Each team member simply places the files in the correct location and reloads the app — no additional setup required.
 

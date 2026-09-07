@@ -104,8 +104,11 @@ SwiftDeck은 시작 후 하루에 최대 한 번 GitHub의 최신 정식 릴리�
 
 ```text
 src/      앱 진입점과 AutoHotkey 라이브러리 소스
+tests/    테스트 모음. scripts/build.ps1이 tests/*Tests.ahk를 모두 실행하고 하나라도 실패하면 빌드를 중단
+scripts/  빌드, 패키징, 서명, 선택적 릴리즈 배포
 assets/   공개 이미지, 아이콘, README 미디어
-dist/     .exe, .zip 같은 로컬 릴리즈 산출물, Git 제외
+dist/     로컬 빌드 산출물(.exe만), Git 제외
+release/  업로드용 자산: 버전 표기 .exe와 .zip, SwiftDeck.exe, SwiftDeck.update.ini, SHA256SUMS.txt, Git 제외
 ```
 
 배포용 바이너리는 저장소 본문에 커밋하지 않고 GitHub Releases에 업로드합니다.
@@ -166,6 +169,8 @@ SwiftDeck 설정값은 모두 로컬 `.ini` 파일에 저장됩니다. 레지스
 - **Backup Saved**: 현재 디스크에 저장된 설정을 백업합니다. General에 미저장 표시가 있다면 먼저 적용하세요.
 - **Restore**: 현재 설정을 교체하기 전에 확인한 뒤 SwiftDeck을 다시 로드합니다.
 - **Factory Reset**: 백업은 보존하고, 확인 후 활성 설정을 기본값으로 교체합니다.
+
+**Restore로 부족할 때.** SwiftDeck은 시작할 때마다 `Backups\<파일>.bak`을 갱신합니다. 그래서 문제를 재시작 후에 알아차렸다면 그 사본에는 이미 문제가 반영돼 있습니다. 덮어쓰기 전의 `.bak`은 `Backups\<파일>.bak.YYYYMMDD`로 보관하며, 하루 1개씩 최대 5일치를 남깁니다. **Restore** 버튼은 확장자가 `.bak`인 파일만 사용하므로, 더 이전으로 돌아가려면 SwiftDeck을 종료한 뒤 설정 폴더에서 원하는 날짜 파일을 해당 `.ini` 위에 복사하고 다시 실행하세요.
 
 팀 배포 시에는 한 명의 관리자가 공통 폴더 경로, 프롬프트, 단축어를 먼저 세팅한 뒤 생성된 `.ini` 파일을 동료에게 공유하면 됩니다. 팀원은 파일을 지정된 위치에 넣고 앱을 재로드하면 즉시 동일한 환경을 사용할 수 있습니다.
 

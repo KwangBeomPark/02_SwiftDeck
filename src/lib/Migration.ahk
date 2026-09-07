@@ -58,8 +58,31 @@ MigrateHotstringIni() {
     if (schemaVer == "4")
         return
 
+    ; The migration rewrites the whole file, so it must never run on content it
+    ; failed to understand. Measured: deleting the SchemaVersion line from a
+    ; current file — a plausible hand edit, and the App Info window offers to
+    ; open this file — makes the legacy reader match none of the v4 section
+    ; names, return zero items, and the rewrite then deletes all 37 of them
+    ; without raising anything.
     hotstringData := ConfigReadHotstringData()
-    ConfigWriteHotstringData(hotstringData.Data, hotstringData.GroupOrder)
+    if (ConfigCountHotstringItems(hotstringData) > 0) {
+        ConfigWriteHotstringData(hotstringData.Data, hotstringData.GroupOrder)
+        return
+    }
+
+    ; Nothing was read. If the file is really in the current format, only the
+    ; marker is missing — put it back rather than rewriting the content.
+    current := ConfigReadHotstringDataV4()
+    if (ConfigCountHotstringItems(current) > 0) {
+        ConfigWriteValue("Hotstrings", "Meta", "SchemaVersion", "4")
+        return
+    }
+
+    ; Neither reader understood it, yet it holds something. Leave it alone and
+    ; let the caller report it: an empty hotstring list is recoverable, a file
+    ; overwritten with an empty default is not.
+    if (ConfigHasContentSections("Hotstrings"))
+        throw Error("The hotstring settings file is not in a recognised format, so it was left unchanged.")
 }
 
 ; True when a file's bytes decode as valid UTF-8. A settings file left over from

@@ -232,4 +232,25 @@ oversized := CalculateCenteredWindowPosition(2200, 1200, -1920, -200, 0, 840)
 AssertEqual(oversized.X, -1920, "Oversized window clamps to work-area left")
 AssertEqual(oversized.Y, -200, "Oversized window clamps to work-area top")
 
+; A hotkey bound with no modifier at all can take the key away from the rest of
+; Windows. Bare LButton swallows every left click, including the clicks needed to
+; open the settings window and undo it, so this rule is what stands between a
+; two-click mistake in the General tab and a machine that needs Task Manager.
+AssertTrue(HotkeyBaseKeyNeedsModifier("LButton"), "A bare left click is refused")
+AssertTrue(HotkeyBaseKeyNeedsModifier("RButton"), "A bare right click is refused")
+AssertTrue(HotkeyBaseKeyNeedsModifier("WheelDown"), "A bare wheel event is refused")
+AssertTrue(HotkeyBaseKeyNeedsModifier("Space"), "A bare Space is refused")
+AssertTrue(HotkeyBaseKeyNeedsModifier("Enter"), "A bare Enter is refused")
+AssertTrue(HotkeyBaseKeyNeedsModifier("Tab"), "A bare Tab is refused")
+AssertTrue(HotkeyBaseKeyNeedsModifier("a"), "A bare letter is refused")
+AssertTrue(HotkeyBaseKeyNeedsModifier("7"), "A bare digit is refused")
+
+; F1 is the shipped default, so the rule must not be a blanket "needs a
+; modifier" — that would refuse the app's own out-of-the-box hotkey.
+AssertTrue(!HotkeyBaseKeyNeedsModifier("F1"), "F1 stays usable on its own")
+AssertTrue(!HotkeyBaseKeyNeedsModifier("F12"), "Function keys stay usable on their own")
+AssertTrue(!HotkeyBaseKeyNeedsModifier("Escape"), "Escape stays usable on its own")
+AssertTrue(!HotkeyBaseKeyNeedsModifier("Insert"), "Insert stays usable on its own")
+AssertTrue(!HotkeyBaseKeyNeedsModifier(""), "An empty key is left to the other checks")
+
 TestsPassed("Utils")

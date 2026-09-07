@@ -304,6 +304,14 @@ class PreferencesManager {
             return false
         }
 
+        mainHasModifier := (this.chkMainCtrl.Value || this.chkMainShift.Value
+            || this.chkMainWin.Value || this.chkMainAlt.Value)
+        if (!mainHasModifier && HotkeyBaseKeyNeedsModifier(mainBase)) {
+            MsgBox("⚠️ " . GetHotkeyModifierRuleMessage(mainBase) . "`n`nNo settings were saved.",
+                "Invalid Hotkey", 262160)
+            return false
+        }
+
         newHotkey := BuildKeyString(this.chkMainCtrl.Value, this.chkMainShift.Value, this.chkMainWin.Value, this.chkMainAlt.Value, mainBase)
         newModVal := BuildKeyString(this.chkPromptCtrl.Value, this.chkPromptShift.Value, this.chkPromptWin.Value, this.chkPromptAlt.Value, "")
         newUseNumpad := (this.ddlPromptNumpad.Value == 1) ? 1 : 0

@@ -130,6 +130,11 @@ OnStartup() {
 
     RunStartupStep("Settings files", InitializeAllConfigs, warnings)
 
+    ; Back up before migrating, not after. The migrations rewrite whole files,
+    ; so running the backup afterwards means a migration that gets it wrong is
+    ; immediately copied over the one recovery point the user had.
+    RunStartupStep("Settings backup", BackupConfigs, warnings)
+
     ; Run config migrations
     RunStartupStep("Encoding migration", MigrateIniEncoding, warnings)
     RunStartupStep("Hotstring migration", MigrateHotstringIni, warnings)
@@ -147,16 +152,27 @@ OnStartup() {
         warnings.Push("Hotkey settings (defaults applied): " . err.Message)
     }
 
-    ; Auto-backup existing config files (.bak)
-    RunStartupStep("Settings backup", BackupConfigs, warnings)
-
     ; Load runtime input automation features
     RunStartupStep("Hotstrings", LoadHotstrings, warnings)
     RunStartupStep("Emoji & Symbols menu", BuildEmojiMenu, warnings)
     RunStartupStep("Key remapping", LoadKeyRemaps, warnings)
     OnExit(CleanupKeyRemaps)
 
-    ; Register dynamic hotkey (main menu)
+    ; Register dynamic hotkey (main menu). The settings editor refuses a bare
+    ; mouse button or typing key, but the file can also be hand-edited or shared
+    ; between machines, and registering "LButton" here would swallow every click
+    ; in Windows — including the ones needed to fix it. Fall back rather than
+    ; leave the user with no way back.
+    if (settings.MainHotkey != "") {
+        parsedMain := ParseKeyString(settings.MainHotkey)
+        mainMods := parsedMain.Mods
+        if (!mainMods.Ctrl && !mainMods.Shift && !mainMods.Win && !mainMods.Alt
+            && HotkeyBaseKeyNeedsModifier(parsedMain.BaseKey)) {
+            warnings.Push("Favorites hotkey (default F1 applied): '" . settings.MainHotkey
+                . "' would take over that key everywhere in Windows.")
+            settings.MainHotkey := "F1"
+        }
+    }
     try {
         Hotkey(settings.MainHotkey, (*) => ShowFavoritesMenu())
     } catch {
