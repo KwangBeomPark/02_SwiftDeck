@@ -163,15 +163,23 @@ OnStartup() {
     ; between machines, and registering "LButton" here would swallow every click
     ; in Windows — including the ones needed to fix it. Fall back rather than
     ; leave the user with no way back.
-    if (settings.MainHotkey != "") {
-        parsedMain := ParseKeyString(settings.MainHotkey)
-        mainMods := parsedMain.Mods
-        if (!mainMods.Ctrl && !mainMods.Shift && !mainMods.Win && !mainMods.Alt
-            && HotkeyBaseKeyNeedsModifier(parsedMain.BaseKey)) {
-            warnings.Push("Favorites hotkey (default F1 applied): '" . settings.MainHotkey
-                . "' would take over that key everywhere in Windows.")
-            settings.MainHotkey := "F1"
+    ; Wrapped because nothing between here and SetupTrayMenu() may throw: a
+    ; failure at this point would leave the app running with no tray icon and no
+    ; way to close it, which is the exact state this startup path exists to
+    ; prevent.
+    try {
+        if (settings.MainHotkey != "") {
+            parsedMain := ParseKeyString(settings.MainHotkey)
+            mainMods := parsedMain.Mods
+            if (!mainMods.Ctrl && !mainMods.Shift && !mainMods.Win && !mainMods.Alt
+                && HotkeyBaseKeyNeedsModifier(parsedMain.BaseKey)) {
+                warnings.Push("Favorites hotkey (default F1 applied): '" . settings.MainHotkey
+                    . "' would take over that key everywhere in Windows.")
+                settings.MainHotkey := "F1"
+            }
         }
+    } catch Error as err {
+        warnings.Push("Favorites hotkey check: " . err.Message)
     }
     try {
         Hotkey(settings.MainHotkey, (*) => ShowFavoritesMenu())
