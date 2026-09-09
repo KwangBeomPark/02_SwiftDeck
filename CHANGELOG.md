@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.3.2 — 2026-09-07
+## 1.4.0 — 2026-09-09
 
 ### Release summary (English)
 
@@ -18,9 +18,9 @@ A maintenance release focused on things that failed quietly. The detailed notes 
 
 **Things that did not display or open correctly.** Folders with `&` in the name showed as `RD` instead of `R&D` and were refused outright by a shell-injection check that could never have applied. Two favourites with the same name collapsed into one. Settings and manual windows were cut off below the screen edge at high display scaling, putting Factory Reset and Backup permanently out of reach.
 
-**Additions.** A built-in symbol set for the Emoji menu (arrows, currency, maths, marks, checks, brackets), editable Emoji and Exit hotkeys in the General tab, and version-stamped release assets (`SwiftDeck.v1.3.2.exe`).
+**Additions.** A built-in symbol set for the Emoji menu (arrows, currency, maths, marks, checks, brackets), editable Emoji and Exit hotkeys in the General tab, and version-stamped release assets (`SwiftDeck.v1.4.0.exe`).
 
-**Verifying this release.** It is not code-signed yet. Every release now publishes `SHA256SUMS.txt` with a digest for each asset — see [What Windows Will Say](README.md#-what-windows-will-say) for how Windows reacts and what to do about Smart App Control.
+**Verifying this release.** From this version the executables are code-signed with a Certum open-source developer certificate, SHA-256 and timestamped, so Windows names the publisher and can tell that the file has not been altered since it was built. Measured on a machine with Smart App Control in enforcing mode: the signed build runs, where the unsigned build of the same app had been blocked outright. SmartScreen may still prompt on early downloads, since reputation is earned per certificate. Every release also publishes `SHA256SUMS.txt` with a digest for each asset — see [What Windows Will Say](README.md#-what-windows-will-say).
 
 
 ### Add Current Folder 오류 수정
@@ -97,9 +97,16 @@ A maintenance release focused on things that failed quietly. The detailed notes 
 
 ### 릴리스 자산 이름
 
-- 릴리스 실행 파일과 ZIP에 버전을 표기합니다. `SwiftDeck.v1.3.2.exe`, `SwiftDeck.v1.3.2.zip`
+- 릴리스 실행 파일과 ZIP에 버전을 표기합니다. `SwiftDeck.v1.4.0.exe`, `SwiftDeck.v1.4.0.zip`
 - 자동 업데이트 호환을 위해 같은 내용의 `SwiftDeck.exe`도 함께 올립니다. v1.3.1 이하 설치본은 이 파일로 계속 업데이트됩니다.
-- `SwiftDeck.update.ini`에 `AssetVersioned` 항목을 추가했습니다. v1.3.2 이상은 버전 표기 파일을 우선 내려받고, 없으면 `SwiftDeck.exe`로 자동 대체합니다.
+- `SwiftDeck.update.ini`에 `AssetVersioned` 항목을 추가했습니다. v1.4.0 이상은 버전 표기 파일을 우선 내려받고, 없으면 `SwiftDeck.exe`로 자동 대체합니다.
+- 파일별 SHA-256을 담은 `SHA256SUMS.txt`를 릴리스 자산으로 함께 올리고, 릴리스 본문에도 같은 내용을 적습니다.
+
+### 코드 서명
+
+- **이번 버전부터 실행 파일에 코드 서명이 들어갑니다.** Certum 오픈소스 개발자 인증서로 SHA-256 서명하고 타임스탬프를 찍었습니다. 타임스탬프가 있으므로 인증서가 만료된 뒤에도 서명은 유효하게 남습니다. 파일 속성 → 디지털 서명에서 게시자를 확인할 수 있습니다.
+- **Smart App Control이 더 이상 차단하지 않습니다.** 강제 모드가 켜진 PC에서 실측했습니다 — 같은 앱의 미서명 빌드는 차단됐지만(이벤트 3077), 서명된 v1.4.0은 그대로 실행됐습니다.
+- SmartScreen 경고는 초기에 남을 수 있습니다. 평판은 인증서 단위로 다운로드가 쌓이며 생깁니다.
 
 ## 1.3.1 — 2026-08-23
 

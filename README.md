@@ -37,7 +37,7 @@ It is designed especially for finance, sales administration, accounting, credit 
 ### 📥 For General Users (1-Click Portable Download)
 
 1. Go to the **[Releases](https://github.com/KwangBeomPark/02_SwiftDeck/releases)** tab on the right side of the GitHub repository.
-2. Download the latest **`SwiftDeck.vX.Y.Z.zip`** or standalone **`SwiftDeck.vX.Y.Z.exe`** file (for example `SwiftDeck.v1.3.2.exe`).
+2. Download the latest **`SwiftDeck.vX.Y.Z.zip`** or standalone **`SwiftDeck.vX.Y.Z.exe`** file (for example `SwiftDeck.v1.4.0.exe`).
 3. Unzip the file if needed, then double-click the downloaded `.exe`.
    Each release also ships an identical `SwiftDeck.exe` under the fixed name, which the built-in updater in v1.3.1 and earlier relies on.
 4. A black lightning bolt icon will appear in the Windows system tray — SwiftDeck is ready to use.
@@ -46,27 +46,33 @@ If no release file is available yet, please build or run `src/SwiftDeck.ahk` usi
 
 ### 🛡️ What Windows Will Say
 
-SwiftDeck releases are **not code-signed yet**, so Windows treats the download as a program it has never seen. What you get depends on which protection is active on your machine:
+**From v1.4.0, SwiftDeck releases are code-signed.** The executables carry an Authenticode signature from a Certum open-source developer certificate issued to the author, SHA-256 and timestamped, so Windows can tell you who published the file and confirm the bytes have not been altered since.
 
-| Protection | What happens | What to do |
-| --- | --- | --- |
-| **SmartScreen** | A blue "Windows protected your PC" dialog | Click **More info**, then **Run anyway** |
-| **Smart App Control** | The app is **blocked outright** — no dialog to click through | See below |
-| **Antivirus or company policy** | May quarantine the file or block it silently | Ask your IT team to allow it |
+That changes what you should expect:
 
-**Smart App Control** is the one that stops you completely. It is on by default on clean Windows 11 installs, it enforces below the desktop rather than warning you, and it refuses any unsigned program that has no established reputation. Check it under **Windows Security → App & browser control → Smart App Control**. If it says **On**:
+| Protection | What happens |
+| --- | --- |
+| **Smart App Control** | The app **runs**. Measured on a machine with Smart App Control in enforcing mode: the signed v1.4.0 build started normally, where the unsigned build of the same app had been blocked outright. |
+| **SmartScreen** | May still show "Windows protected your PC" on early downloads. The certificate is new, and SmartScreen reputation is earned per certificate over downloads. Click **More info**, check that the publisher reads **Open Source Developer KWANG BEOM PARK**, then **Run anyway**. |
+| **Antivirus or company policy** | Can still quarantine or block by its own rules. Ask your IT team to allow it. |
 
-- **Run from source instead** — install [AutoHotkey v2](https://www.autohotkey.com/) and run `src/SwiftDeck.ahk`. The AutoHotkey interpreter is signed, so this path works with Smart App Control left on. This is the recommended option on a work machine.
-- Turning Smart App Control off also works, but it is a **one-way change**: Windows cannot switch it back on without reinstalling the operating system. Do not do this on a machine you do not own.
+**Verify the publisher before you run it.** Right-click the `.exe` → **Properties** → **Digital Signatures** → select the signature → **Details**. It should read:
 
-Signing is planned once an open-source code-signing certificate is in place. Note that signing alone does not remove the SmartScreen prompt immediately — reputation builds up over downloads — so the source-run option above stays the reliable one for locked-down environments.
+```text
+Name of signer:  Open Source Developer KWANG BEOM PARK
+Issuer:          Certum Code Signing 2021 CA
+```
+
+If that tab is missing, or the name differs, the file is not the one published here — delete it.
+
+**If your machine still blocks it**, install [AutoHotkey v2](https://www.autohotkey.com/) and run `src/SwiftDeck.ahk` from source instead. The AutoHotkey interpreter is itself signed, so that path works under strict policies. Do not turn Smart App Control off to work around a block: it is a **one-way change**, and Windows cannot switch it back on without reinstalling the operating system.
 
 ### 🔍 Verifying Your Download
 
-An unsigned download is exactly the case where you cannot tell the real file from one that was swapped in transit, so every release ships a `SHA256SUMS.txt` asset listing a digest for each file. Compare it with what you downloaded:
+The signature already tells you the executable is unaltered, but the `.zip` is not signed and a digest is quicker to compare than a certificate dialog. Every release ships a `SHA256SUMS.txt` asset listing a digest for each file:
 
 ```powershell
-Get-FileHash .\SwiftDeck.v1.3.2.exe -Algorithm SHA256
+Get-FileHash .\SwiftDeck.v1.4.0.exe -Algorithm SHA256
 ```
 
 The printed hash must match the line for that filename in `SHA256SUMS.txt`. If it does not, delete the file and download it again.
@@ -97,8 +103,8 @@ build stays verifiable by the updater. Without the parameter the build is unsign
 Before publishing, exercise the self-update path against the previous release:
 
 ```powershell
-.\tests\Test-UpdateWorker.ps1 -OldExe dist\SwiftDeck.v1.3.1.exe -NewExe release\SwiftDeck.v1.3.2.exe -WorkRoot $env:TEMP
-.\tests\Test-UpdateRollback.ps1 -OldExe release\SwiftDeck.v1.3.2.exe -WorkRoot $env:TEMP
+.\tests\Test-UpdateWorker.ps1 -OldExe dist\SwiftDeck.v1.3.1.exe -NewExe release\SwiftDeck.v1.4.0.exe -WorkRoot $env:TEMP
+.\tests\Test-UpdateRollback.ps1 -OldExe release\SwiftDeck.v1.4.0.exe -WorkRoot $env:TEMP
 ```
 
 ### Repository Layout
@@ -184,7 +190,7 @@ For team deployment, one manager can configure common folder paths, prompts, and
 - If bundled support images are missing, the app may download public UI assets such as the Buy Me a Coffee button or GitHub favicon.
 - All folder paths, prompts, hotstrings, and key remap settings are stored in local `.ini` files only.
 - **Folder paths are validated before they are opened**: SwiftDeck checks that the target exists and is a directory, and passes it as a quoted argument. It does not go through a command shell, so characters such as `&`, `|`, `>` and `<` in a folder name cannot chain commands — which is also why a normal folder like `Sales & Marketing` opens correctly rather than being refused.
-- **Releases are not code-signed yet**, and each one publishes a `SHA256SUMS.txt` so you can verify a download. See [What Windows Will Say](#-what-windows-will-say).
+- **Releases are code-signed** from v1.4.0 with a Certum open-source developer certificate, and each one publishes a `SHA256SUMS.txt` so you can verify a download. See [What Windows Will Say](#-what-windows-will-say).
 - Avoid storing passwords, API keys, personal credentials, or highly confidential information in Prompt or Hotstring settings.
 - Review shared `.ini` files carefully before distributing them to other users.
 

@@ -37,7 +37,7 @@
 ### 📥 일반 팀원용 원클릭 다운로드
 
 1. 깃허브 화면 우측의 **[Releases](https://github.com/KwangBeomPark/02_SwiftDeck/releases)** 탭으로 이동합니다.
-2. 최신 릴리즈의 **`SwiftDeck.vX.Y.Z.zip`** 또는 **`SwiftDeck.vX.Y.Z.exe`** 단독 실행 파일을 다운로드합니다. (예: `SwiftDeck.v1.3.2.exe`)
+2. 최신 릴리즈의 **`SwiftDeck.vX.Y.Z.zip`** 또는 **`SwiftDeck.vX.Y.Z.exe`** 단독 실행 파일을 다운로드합니다. (예: `SwiftDeck.v1.4.0.exe`)
 3. 필요한 경우 압축을 풀고 내려받은 `.exe`를 더블 클릭합니다.
    각 릴리즈에는 내용이 같은 `SwiftDeck.exe`도 함께 올라갑니다. v1.3.1 이하 버전의 자동 업데이트가 이 이름을 사용합니다.
 4. Windows 우측 하단 시스템 트레이에 검은색 번개 아이콘이 표시되면 바로 사용할 수 있습니다.
@@ -46,27 +46,33 @@
 
 ### 🛡️ Windows가 띄우는 경고
 
-SwiftDeck 릴리즈에는 **아직 코드 서명이 없습니다.** Windows는 처음 보는 프로그램으로 취급하며, PC에 어떤 보호 기능이 켜져 있느냐에 따라 반응이 다릅니다.
+**v1.4.0부터 SwiftDeck 릴리즈에는 코드 서명이 들어갑니다.** 제작자 명의로 발급된 Certum 오픈소스 개발자 인증서로 SHA-256 서명하고 타임스탬프를 찍었습니다. 누가 배포했는지 Windows가 확인할 수 있고, 배포 이후 파일이 변조되지 않았음도 검증됩니다.
 
-| 보호 기능 | 증상 | 대처 |
-| --- | --- | --- |
-| **SmartScreen** | 파란 "Windows의 PC 보호" 창 | **추가 정보** → **실행**을 누릅니다 |
-| **Smart App Control** | **아예 실행이 차단됩니다.** 눌러서 넘어갈 창조차 없습니다 | 아래 참고 |
-| **백신 · 사내 정책** | 파일을 격리하거나 조용히 차단할 수 있습니다 | 전산 담당자에게 허용을 요청합니다 |
+그래서 예상되는 반응이 달라집니다.
 
-문제가 되는 쪽은 **Smart App Control**입니다. Windows 11을 새로 설치하면 기본으로 켜져 있고, 경고가 아니라 커널 수준에서 실행을 막으며, 서명이 없고 평판이 쌓이지 않은 프로그램은 예외 없이 거부합니다. **Windows 보안 → 앱 및 브라우저 컨트롤 → 스마트 앱 제어**에서 상태를 확인할 수 있습니다. **켬**으로 되어 있다면:
+| 보호 기능 | 증상 |
+| --- | --- |
+| **Smart App Control** | **정상 실행됩니다.** 강제 모드가 켜진 PC에서 실측했습니다 — 같은 앱의 미서명 빌드는 차단됐지만, 서명된 v1.4.0은 그대로 실행됐습니다. |
+| **SmartScreen** | 초기에는 "Windows의 PC 보호" 창이 뜰 수 있습니다. 인증서가 새것이고 SmartScreen 평판은 인증서 단위로 다운로드가 쌓이며 생깁니다. **추가 정보**를 누르고 게시자가 **Open Source Developer KWANG BEOM PARK**인지 확인한 뒤 **실행**을 누르세요. |
+| **백신 · 사내 정책** | 자체 규칙으로 격리하거나 차단할 수 있습니다. 전산 담당자에게 허용을 요청하세요. |
 
-- **소스로 실행하세요.** [AutoHotkey v2](https://www.autohotkey.com/)를 설치하고 `src/SwiftDeck.ahk`를 실행합니다. AutoHotkey 실행기는 서명되어 있어 Smart App Control을 켠 채로도 정상 동작합니다. 회사 PC라면 이 방법을 권합니다.
-- Smart App Control을 끄는 방법도 있지만 **한 번 끄면 되돌릴 수 없습니다.** 운영체제를 다시 설치하지 않는 한 다시 켤 수 없으므로, 본인 소유가 아닌 PC에서는 하지 마세요.
+**실행 전에 게시자를 확인하세요.** `.exe`를 우클릭 → **속성** → **디지털 서명** → 서명 선택 → **자세히**. 아래와 같이 보여야 합니다.
 
-오픈소스용 코드 서명 인증서가 준비되면 서명할 예정입니다. 다만 서명을 해도 SmartScreen 경고가 곧바로 사라지지는 않습니다(내려받은 횟수에 따라 평판이 쌓입니다). 통제가 엄격한 환경에서는 위의 소스 실행 방법이 계속 확실한 선택입니다.
+```text
+서명자 이름:  Open Source Developer KWANG BEOM PARK
+발급자:       Certum Code Signing 2021 CA
+```
+
+**디지털 서명** 탭 자체가 없거나 이름이 다르면 여기서 배포한 파일이 아닙니다. 삭제하세요.
+
+**그래도 차단된다면** [AutoHotkey v2](https://www.autohotkey.com/)를 설치하고 `src/SwiftDeck.ahk`를 소스로 실행하세요. AutoHotkey 실행기 자체가 서명되어 있어 엄격한 정책에서도 동작합니다. 차단을 피하려고 Smart App Control을 끄지는 마세요 — **한 번 끄면 되돌릴 수 없고**, 운영체제를 다시 설치하지 않는 한 다시 켤 수 없습니다.
 
 ### 🔍 내려받은 파일 확인
 
-서명이 없는 파일은 전송 중에 바뀌어도 사용자가 구분할 방법이 없습니다. 그래서 릴리즈마다 파일별 해시를 담은 `SHA256SUMS.txt`를 함께 올립니다. 내려받은 파일과 비교해 보세요.
+서명만으로도 실행 파일이 변조되지 않았음은 확인됩니다. 다만 `.zip`에는 서명이 없고, 인증서 창을 여는 것보다 해시 비교가 빠릅니다. 릴리즈마다 파일별 해시를 담은 `SHA256SUMS.txt`를 함께 올립니다.
 
 ```powershell
-Get-FileHash .\SwiftDeck.v1.3.2.exe -Algorithm SHA256
+Get-FileHash .\SwiftDeck.v1.4.0.exe -Algorithm SHA256
 ```
 
 출력된 해시가 `SHA256SUMS.txt`의 해당 파일 줄과 같아야 합니다. 다르면 파일을 지우고 다시 내려받으세요.
@@ -96,8 +102,8 @@ SwiftDeck은 시작 후 하루에 최대 한 번 GitHub의 최신 정식 릴리�
 릴리스 전에는 이전 버전에서 올라오는 자동 업데이트 경로를 확인하세요.
 
 ```powershell
-.\tests\Test-UpdateWorker.ps1 -OldExe dist\SwiftDeck.v1.3.1.exe -NewExe release\SwiftDeck.v1.3.2.exe -WorkRoot $env:TEMP
-.\tests\Test-UpdateRollback.ps1 -OldExe release\SwiftDeck.v1.3.2.exe -WorkRoot $env:TEMP
+.\tests\Test-UpdateWorker.ps1 -OldExe dist\SwiftDeck.v1.3.1.exe -NewExe release\SwiftDeck.v1.4.0.exe -WorkRoot $env:TEMP
+.\tests\Test-UpdateRollback.ps1 -OldExe release\SwiftDeck.v1.4.0.exe -WorkRoot $env:TEMP
 ```
 
 ### 저장소 구조
@@ -183,7 +189,7 @@ SwiftDeck 설정값은 모두 로컬 `.ini` 파일에 저장됩니다. 레지스
 - 번들된 지원 이미지가 없는 경우 Buy Me a Coffee 버튼, GitHub favicon 같은 공개 UI 자산을 다운로드할 수 있습니다.
 - 폴더 경로, 프롬프트, 단축어, 키 리매핑 설정은 모두 로컬 `.ini` 파일에만 저장됩니다.
 - **폴더 경로는 열기 전에 검증합니다.** 대상이 실제로 존재하는 폴더인지 확인한 뒤 따옴표로 감싼 인자로 전달합니다. 명령 셸을 거치지 않으므로 폴더 이름에 `&` · `|` · `>` · `<`가 들어 있어도 명령을 이어붙일 수 없습니다. 같은 이유로 `Sales & Marketing` 같은 정상 폴더도 차단되지 않고 정상적으로 열립니다.
-- **릴리즈에는 아직 코드 서명이 없습니다.** 대신 릴리즈마다 `SHA256SUMS.txt`를 함께 올려 내려받은 파일을 확인할 수 있게 합니다. [Windows가 띄우는 경고](#-windows가-띄우는-경고) 항목을 참고하세요.
+- **릴리즈는 v1.4.0부터 Certum 오픈소스 개발자 인증서로 코드 서명됩니다.** 릴리즈마다 `SHA256SUMS.txt`도 함께 올려 내려받은 파일을 확인할 수 있게 합니다. [Windows가 띄우는 경고](#-windows가-띄우는-경고) 항목을 참고하세요.
 - 비밀번호, API Key, 개인 인증정보, 고도의 기밀정보는 Prompt 또는 Hotstring 설정에 저장하지 않는 것을 권장합니다.
 - 팀원에게 `.ini` 파일을 공유하기 전에는 포함된 경로와 문구를 반드시 검토하세요.
 
