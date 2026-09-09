@@ -140,6 +140,14 @@ function Invoke-ArtifactSigning {
         if ($result.Status -ne "Valid") {
             throw "Signing failed for $path : $($result.Status) - $($result.StatusMessage)"
         }
+        # Status alone does not prove a timestamp was applied: an un-timestamped
+        # signature still reports Valid while the certificate is inside its
+        # validity window, and only stops validating years later, on machines
+        # nobody is watching. Check the countersignature itself.
+        if (-not $result.TimeStamperCertificate) {
+            throw ("No timestamp was applied to $path (server: $TimestampUrl). " +
+                "The signature would stop validating when the certificate expires.")
+        }
         Write-Host ("  signed: {0}" -f (Split-Path $path -Leaf))
     }
 }
@@ -187,6 +195,15 @@ try {
         if ($signingCertificate.NotAfter -lt (Get-Date)) {
             throw "That code-signing certificate expired on $($signingCertificate.NotAfter.ToString('yyyy-MM-dd'))."
         }
+    }
+
+    # Fail closed rather than warn. Publishing without a certificate used to be
+    # guarded only by Write-Warning, which does not stop the run and scrolls past
+    # inside the compile and hash output -- so a forgotten -CertificateThumbprint
+    # produced a published, unsigned, irreversible release. Checked here, before
+    # anything is deleted or rebuilt.
+    if ($Publish -and -not $signingCertificate) {
+        throw "Refusing to publish an unsigned release. Pass -CertificateThumbprint <thumbprint>."
     }
 
     # Before anything is deleted or built: a failing test should stop the run
@@ -332,52 +349,88 @@ try {
         if ($gitStatus) {
             throw "The Git worktree must be clean before publishing a release."
         }
+        # A failed fetch leaves refs/remotes/origin/main at whatever it held
+        # before, so the comparison below would validate against a stale snapshot
+        # of the remote and report nothing. Every other external call in this
+        # block checks its exit code; this one used to be the gap.
         & git fetch origin main | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+            throw "Could not fetch origin/main; the local remote-tracking ref may be stale."
+        }
         $localHead = (& git rev-parse HEAD).Trim()
         $remoteHead = (& git rev-parse origin/main).Trim()
         if ($localHead -ne $remoteHead) {
             throw "Local main and origin/main must match before publishing."
         }
 
+        # --target takes the verified SHA, not the branch name. A draft creates no
+        # tag; GitHub creates it only when the draft is published, resolving the
+        # target at that moment -- so "main" would tag whatever main points at
+        # then, not the commit whose artifacts were just built and checked.
         & gh release create "v$version" $releaseExe $releaseZip $compatExe $releaseManifest $releaseChecksums `
-            --draft --target main --title "SwiftDeck v$version" --generate-notes
+            --draft --target $localHead --title "SwiftDeck v$version" --generate-notes
         if ($LASTEXITCODE -ne 0) {
             throw "Could not create the draft GitHub Release."
         }
 
-        # Put the digests in the body as well as in the asset. Someone deciding
-        # whether to trust an unsigned download should not have to open a second
-        # file to find out what it should hash to. Appended to the generated
-        # notes rather than replacing them, and never fatal: a release with the
-        # right binaries and plain notes is still a good release, and it is
-        # already a draft the author can edit.
+        # Write the release body ourselves. --generate-notes builds its notes from
+        # merged pull requests, and this repository has never had one: the v1.3.1
+        # release page carries a single compare link and nothing else. So the
+        # notes start from this version's CHANGELOG section -- the only place that
+        # actually describes what changed -- then the generated compare link, then
+        # the digests, so nobody has to open a second file to check the first.
         $generatedNotes = & gh release view "v$version" --json body -q .body
-        if ($LASTEXITCODE -eq 0) {
-            $digestBlock = (Get-Content -LiteralPath $releaseChecksums) -join "`n"
-            $signingNote = if ($signature.Status -eq "Valid") {
-                "This build is code-signed."
-            } else {
-                "This build is **not code-signed**. Smart App Control blocks unsigned programs outright rather than warning -- see [What Windows Will Say](https://github.com/KwangBeomPark/02_SwiftDeck#-what-windows-will-say)."
+        if ($LASTEXITCODE -ne 0) {
+            $generatedNotes = ""
+            Write-Warning "Could not read the generated release notes; publishing without the compare link."
+        }
+
+        $changelogSection = ""
+        $changelogPath = Join-Path $repoRoot "CHANGELOG.md"
+        if (Test-Path -LiteralPath $changelogPath) {
+            $lines = Get-Content -LiteralPath $changelogPath
+            $start = -1
+            for ($i = 0; $i -lt $lines.Count; $i++) {
+                if ($lines[$i] -eq "## $version" -or $lines[$i] -like "## $version *") { $start = $i; break }
             }
-            $notes = @(
-                $generatedNotes,
-                "",
-                "## Verifying this download",
-                "",
-                $signingNote,
-                "",
-                "``````",
-                $digestBlock,
-                "``````",
-                "",
-                "Check a file with ``Get-FileHash .\<file> -Algorithm SHA256``. ``SwiftDeck.exe`` is a byte-identical copy of the version-stamped executable, kept for the updater in v1.3.1 and earlier."
-            ) -join "`n"
-            & gh release edit "v$version" --notes $notes
-            if ($LASTEXITCODE -ne 0) {
-                Write-Warning "Could not add the checksum block to the release notes; the SHA256SUMS.txt asset is still attached."
+            if ($start -ge 0) {
+                $end = $lines.Count
+                for ($i = $start + 1; $i -lt $lines.Count; $i++) {
+                    if ($lines[$i] -like "## *") { $end = $i; break }
+                }
+                # Drop the "## <version>" heading itself; the release is titled already.
+                $changelogSection = ($lines[($start + 1)..($end - 1)] -join "`n").Trim()
             }
-        } else {
-            Write-Warning "Could not read the generated release notes; skipping the checksum block."
+        }
+        if (-not $changelogSection) {
+            Write-Warning "No CHANGELOG.md section found for $version; the release notes will not describe the changes."
+        }
+
+        $digestBlock = (Get-Content -LiteralPath $releaseChecksums) -join "`n"
+        $notes = @(
+            $changelogSection,
+            "",
+            "## Verifying this download",
+            "",
+            "This build is code-signed. Check the publisher in the file's **Properties -> Digital Signatures** tab before running it, or compare a digest:",
+            "",
+            "``````",
+            $digestBlock,
+            "``````",
+            "",
+            "``Get-FileHash .\<file> -Algorithm SHA256``. ``SwiftDeck.exe`` is a byte-identical copy of the version-stamped executable, kept so the updater in v1.3.1 and earlier keeps working.",
+            "",
+            $generatedNotes
+        ) -join "`n"
+
+        # Piped through stdin rather than passed as an argument. Windows
+        # PowerShell 5.1 does not escape double quotes inside a native argument:
+        # an even number of them is silently deleted and an odd number splits the
+        # argument outright, which would mangle or truncate the notes the moment a
+        # changelog entry quotes something.
+        $notes | & gh release edit "v$version" --notes-file -
+        if ($LASTEXITCODE -ne 0) {
+            Write-Warning "Could not set the release notes; the SHA256SUMS.txt asset is still attached."
         }
 
         & gh release edit "v$version" --draft=false --latest

@@ -4,7 +4,7 @@
 
 ### Release summary (English)
 
-A maintenance release focused on things that failed quietly. The detailed notes below are in Korean; this is what changed.
+A hardening release, plus the first code-signed build. Most of it fixes things that failed quietly — settings that vanished with no error, and states the app could not be closed from. The detailed notes below are in Korean; this is what changed.
 
 **Settings that were being lost.** Several kinds of ordinary input were discarded without any error message, and in each case the loss became permanent on the next save:
 
@@ -12,6 +12,7 @@ A maintenance release focused on things that failed quietly. The detailed notes 
 - A hotstring replacement wrapped in quotes — `"As discussed"`, `'확인'` — came back without them, because Windows strips a surrounding quote pair when reading a settings value. A replacement of `''` lost the entry entirely.
 - A hotstring replacement longer than about 32,000 stored characters made the entry vanish outright rather than being truncated.
 - A prompt slot larger than Windows can read back returned empty, discarding every prompt in it.
+- Deleting one line from the hotstring settings file — the `SchemaVersion` marker — made the app discard every registered hotstring on the next start, silently. Measured: 37 shipped entries down to 0, with no error and no warning, and the startup backup then copied the emptied file over the only recovery point. The migration now refuses to rewrite anything it could not read, and the backup runs before it rather than after.
 - A single corrupted `.bak` used to be the only backup, so one restart after a problem overwrote the copy that could have fixed it. Releases now keep five dated generations.
 
 **Errors that reached the user raw.** `Ctrl+F1` in Explorer raised a COM error; an unhandled error showed an AutoHotkey dialog with source paths in it; a failure while loading settings could leave the app running with no tray icon, so it could not even be closed. Startup now degrades a feature at a time and always installs the tray icon.
@@ -20,7 +21,7 @@ A maintenance release focused on things that failed quietly. The detailed notes 
 
 **Additions.** A built-in symbol set for the Emoji menu (arrows, currency, maths, marks, checks, brackets), editable Emoji and Exit hotkeys in the General tab, and version-stamped release assets (`SwiftDeck.v1.4.0.exe`).
 
-**Verifying this release.** From this version the executables are code-signed with a Certum open-source developer certificate, SHA-256 and timestamped, so Windows names the publisher and can tell that the file has not been altered since it was built. Measured on a machine with Smart App Control in enforcing mode: the signed build runs, where the unsigned build of the same app had been blocked outright. SmartScreen may still prompt on early downloads, since reputation is earned per certificate. Every release also publishes `SHA256SUMS.txt` with a digest for each asset — see [What Windows Will Say](README.md#-what-windows-will-say).
+**Verifying this release.** From this version the executables are code-signed with a Certum open-source developer certificate, SHA-256 and timestamped, so Windows names the publisher and can tell that the file has not been altered since it was built. Measured on a machine with Smart App Control in enforcing mode: the signed build runs, where the unsigned build of the same app had been blocked outright. SmartScreen may still prompt on early downloads, since reputation is earned per certificate. Every release also publishes `SHA256SUMS.txt` with a digest for each downloadable binary — see [What Windows Will Say](README.md#-what-windows-will-say).
 
 
 ### Add Current Folder 오류 수정
@@ -58,11 +59,13 @@ A maintenance release focused on things that failed quietly. The detailed notes 
 - 시작 경고를 `SwiftDeck-error.log`에도 남깁니다. 알림 배너는 길이 제한이 있고 집중 지원 모드에서는 아예 표시되지 않습니다.
 - 오류 안내가 로그 저장에 실패한 경우 저장됐다고 말하지 않습니다.
 - **백업을 날짜별로 5세대까지 보관합니다.** 이전에는 `.bak` 하나뿐이라 설정이 손상된 채 한 번만 재시작하면 복구본까지 손상본으로 덮여 되돌릴 방법이 없었습니다. 하루 1세대만 남겨 재시작이 잦아도 늘어나지 않습니다.
+- **Hotstring 설정 파일에서 `SchemaVersion` 줄이 사라지면 등록된 문구가 전부 지워지던 문제를 고쳤습니다.** 손으로 편집하다 이 줄을 지우거나(App Info의 파일 열기 버튼이 바로 이 파일을 엽니다) 다른 PC에서 받은 파일의 앞부분이 잘려 있으면, 이전 형식 리더가 한 항목도 읽지 못한 채 파일 전체를 빈 기본 그룹으로 덮어썼습니다 — 실측으로 기본 문구 **37개가 0개**가 되었고, 오류창도 시작 경고도 없었습니다. 이제 읽지 못한 내용은 덮어쓰지 않습니다. 파일이 실제로 현재 형식이면 표시만 복원하고, 어느 리더도 이해하지 못하면 그대로 둔 채 알립니다.
+- **설정 백업을 마이그레이션보다 먼저 수행합니다.** 이전에는 순서가 반대라, 마이그레이션이 파일을 잘못 다시 쓰면 그 결과가 곧바로 유일한 복구본 위에 복사됐습니다.
 - **Hotstring 그룹 선택을 목록 선택 전용으로 바꿨습니다.** 콤보박스에 그룹명을 직접 입력하면 그 그룹이 저장 대상 목록에 없어 항목이 기록되지 않는데도 "추가 완료"가 표시됐습니다. 그룹 생성은 `⚙️ Groups`에서 합니다.
 - **따옴표로 감싼 Hotstring 문구에서 따옴표가 사라지던 문제를 수정했습니다.** `"확인했습니다"`나 `'확인'`처럼 앞뒤가 따옴표인 문구를 저장하면 다음에 읽을 때 따옴표가 빠진 채로 들어왔고, 그 상태로 다시 저장되면서 영구히 없어졌습니다. Windows가 설정값을 하나씩 읽을 때 감싼 따옴표 한 쌍을 큰따옴표·작은따옴표 모두 벗겨내기 때문입니다(`it's fine`처럼 문장 중간의 따옴표는 무관). 그룹 이름도 같은 경로를 씁니다. 문구가 `''`뿐이면 항목 자체가 사라졌습니다.
-- **너무 긴 Hotstring 치환문을 저장 전에 막습니다.** 저장 형태로 32,768자를 넘으면 Windows가 값을 잘라내는 게 아니라 **항목을 통째로 없애거나**(실측: 32,768자 → 소멸, 33,000자 → 232자) 앞부분만 남겼고, 다음 저장 때 그대로 확정됐습니다. 줄바꿈은 저장할 때 6자를 차지하므로 붙여넣은 긴 문서는 보이는 길이보다 빨리 한계에 닿습니다. (치환문 1개 30,000자)
+- **너무 긴 Hotstring 치환문을 저장 전에 막습니다.** 저장 형태로 32,767자를 넘으면 Windows가 값을 잘라내는 게 아니라 **항목을 통째로 없애거나**(실측: 32,768자 → 소멸, 33,000자 → 232자) 앞부분만 남겼고, 다음 저장 때 그대로 확정됐습니다. 줄바꿈은 저장할 때 6자를 차지하므로 붙여넣은 긴 문서는 보이는 길이보다 빨리 한계에 닿습니다. (치환문 1개 30,000자)
 - **설정 저장이 실패할 때 임시 파일이 쌓이던 문제를 고쳤습니다.** 동기화 클라이언트나 백신이 설정 파일을 잡고 있으면 저장을 3회 재시도하는데, 재시도마다 새 롤백 사본을 만들고 마지막 하나만 지워 저장 실패 1회당 파일 2개가 설정 폴더에 영구히 남았습니다.
-- **App Settings를 열 때마다 설정 파일을 다시 읽습니다.** 창을 한 번 연 뒤 계속 떠 있으면 처음 읽은 내용으로 고정돼, 그 사이 파일을 직접 편집한 내용이 다음 저장 때 덮어써졌습니다. (App Info의 파일 열기 버튼이 바로 그 편집을 유도합니다)
+- **App Settings를 다시 열면 Folders·Prompts·Hotstrings·Key Remap 탭이 설정 파일을 다시 읽습니다.** 창을 한 번 연 뒤 계속 떠 있으면 처음 읽은 내용으로 고정돼, 그 사이 파일을 직접 편집한 내용이 다음 저장 때 덮어써졌습니다. (App Info의 파일 열기 버튼이 바로 그 편집을 유도합니다) General 탭은 저장하지 않은 편집 내용을 들고 있을 수 있어 다시 읽지 않습니다. `[Settings]`의 단축키 값을 파일에서 직접 고쳤다면 앱을 다시 시작한 뒤 General 탭을 사용하세요.
 - **프롬프트 길이 제한을 검사합니다.** Windows는 설정값 하나가 약 32,000자를 넘으면 조용히 잘라내고, 슬롯 하나가 약 65,000자를 넘으면 **섹션을 통째로 빈 값으로 반환**합니다. 그 상태로 저장하면 해당 슬롯의 프롬프트가 전부 사라졌습니다. 이제 저장 전에 막고 이유를 안내합니다. (프롬프트 1개 30,000자 / 슬롯 1개 60,000자)
 
 ### 기능 추가
@@ -74,6 +77,7 @@ A maintenance release focused on things that failed quietly. The detailed notes 
 ### 충돌·멈춤 방지
 
 - **Key Remap이 앱 자체 단축키를 무력화하던 문제를 막았습니다.** F1처럼 SwiftDeck이 쓰는 키를 리매핑하면 둘이 같은 단축키를 서로 덮어썼고, 그 리매핑을 나중에 삭제하면 `Hotkey(키, "Off")`가 앱 단축키를 꺼버려 **F1이 아무 반응 없이 죽었습니다.** 이제 등록을 막고 어떤 기능과 겹치는지 알려줍니다. 기존 설정에 남아 있는 충돌 항목은 로드하지 않고 목록에 `[inactive]`로 표시합니다.
+- **즐겨찾기 단축키에 마우스 버튼이나 타이핑 키를 단독으로 지정할 수 없게 했습니다.** `LButton`을 모디파이어 없이 걸면 Windows 전체의 왼쪽 클릭이 SwiftDeck으로 넘어가, 트레이 아이콘도 방금 열린 메뉴도 되돌릴 설정 창의 저장 버튼도 누를 수 없게 됐습니다. `Space`·`Enter`·`Tab`과 글자·숫자 키는 같은 일을 키보드에 합니다. 이제 이런 키에는 Ctrl·Shift·Win·Alt 중 하나를 요구합니다. **F1 같은 기능 키는 그대로 단독 사용할 수 있습니다.** 설정 파일에 이미 그런 값이 들어 있으면(직접 편집했거나 다른 PC에서 받은 경우) 시작할 때 F1로 대체하고 알림으로 알려줍니다.
 - **클립보드가 사용 중일 때 프롬프트 붙여넣기가 오류창을 띄우지 않습니다.** 클립보드 관리자·RDP·Office가 클립보드를 잠시 점유하면 예외가 그대로 노출됐습니다. 재시도 시간을 150ms에서 480ms로 늘리고, 서식 복사가 실패하면 일반 텍스트로 대체하며, 그래도 안 되면 툴팁으로 안내합니다. `{Enter}` 같은 키 조합이 섞인 프롬프트도 같은 경로를 쓰므로, 시퀀스 도중에 오류창이 뜨는 일이 없습니다.
 - **번역이 무한히 멈추지 않습니다.** 비동기 요청에 타임아웃이 없어 팝업이 비활성 상태로 계속 멈춰 있을 수 있었습니다. 타임아웃을 걸고, 실패 시 원문을 그대로 반환하던 것을 고쳐 실패 안내가 실제로 표시되도록 했습니다.
 - **App Information이 한 번 실패하면 계속 안 열리던 문제를 고쳤습니다.** 사내망 로그인 페이지 등이 `.png`로 저장되면 이미지 컨트롤 생성이 실패해 창 전체가 열리지 않았고, 파일을 손으로 지우기 전까지 반복됐습니다. 이제 잘못된 파일을 지우고 다음에 다시 받습니다.

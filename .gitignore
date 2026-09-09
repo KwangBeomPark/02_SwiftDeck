@@ -18,6 +18,7 @@ App02_*DoNotDelete.ini
 App02_*DoNotDelete.ini.bak
 
 # Local AI working notes
+.claude/
 AGENTS.md
 AI_CODE_MAP.md
 myAGENT.md

@@ -56,16 +56,20 @@ That changes what you should expect:
 | **SmartScreen** | May still show "Windows protected your PC" on early downloads. The certificate is new, and SmartScreen reputation is earned per certificate over downloads. Click **More info**, check that the publisher reads **Open Source Developer KWANG BEOM PARK**, then **Run anyway**. |
 | **Antivirus or company policy** | Can still quarantine or block by its own rules. Ask your IT team to allow it. |
 
-**Verify the publisher before you run it.** Right-click the `.exe` → **Properties** → **Digital Signatures** → select the signature → **Details**. It should read:
+**Verify the publisher before you run it.** Right-click the `.exe` → **Properties** → **Digital Signatures**. The **Name of signer** column should read `Open Source Developer KWANG BEOM PARK`. Select the signature → **Details** → **View Certificate**, and the **General** tab should show:
 
 ```text
-Name of signer:  Open Source Developer KWANG BEOM PARK
-Issuer:          Certum Code Signing 2021 CA
+Issued to:  Open Source Developer KWANG BEOM PARK
+Issued by:  Certum Code Signing 2021 CA
 ```
 
-If that tab is missing, or the name differs, the file is not the one published here — delete it.
+If the **Digital Signatures** tab is missing, or the name differs, the file is not the one published here — delete it.
 
-**If your machine still blocks it**, install [AutoHotkey v2](https://www.autohotkey.com/) and run `src/SwiftDeck.ahk` from source instead. The AutoHotkey interpreter is itself signed, so that path works under strict policies. Do not turn Smart App Control off to work around a block: it is a **one-way change**, and Windows cannot switch it back on without reinstalling the operating system.
+**If your machine still blocks it**, the signature is what makes this fixable: ask your IT team to allow SwiftDeck by publisher. They can confirm exactly who signed it from the certificate above, which is not something they could do for an unsigned download.
+
+Running from source also works in many environments — install [AutoHotkey v2](https://www.autohotkey.com/) and run `src/SwiftDeck.ahk`. Be aware of what that does and does not buy you: AutoHotkey ships its interpreter **unsigned**, so this route works where Windows already trusts that widely-used binary, but it will not get you past a strict WDAC or AppLocker publisher allowlist — under those rules an unsigned interpreter is exactly what gets blocked, and the signed SwiftDeck executable is the better thing to ask for.
+
+Either way, do not turn Smart App Control off to work around a block: it is a **one-way change**, and Windows cannot switch it back on without reinstalling the operating system.
 
 ### 🔍 Verifying Your Download
 

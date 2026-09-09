@@ -56,16 +56,20 @@
 | **SmartScreen** | 초기에는 "Windows의 PC 보호" 창이 뜰 수 있습니다. 인증서가 새것이고 SmartScreen 평판은 인증서 단위로 다운로드가 쌓이며 생깁니다. **추가 정보**를 누르고 게시자가 **Open Source Developer KWANG BEOM PARK**인지 확인한 뒤 **실행**을 누르세요. |
 | **백신 · 사내 정책** | 자체 규칙으로 격리하거나 차단할 수 있습니다. 전산 담당자에게 허용을 요청하세요. |
 
-**실행 전에 게시자를 확인하세요.** `.exe`를 우클릭 → **속성** → **디지털 서명** → 서명 선택 → **자세히**. 아래와 같이 보여야 합니다.
+**실행 전에 게시자를 확인하세요.** `.exe`를 우클릭 → **속성** → **디지털 서명**. 목록의 **서명자 이름**이 `Open Source Developer KWANG BEOM PARK`여야 합니다. 서명을 선택하고 **자세히** → **인증서 보기**를 누르면 **일반** 탭에 이렇게 나옵니다.
 
 ```text
-서명자 이름:  Open Source Developer KWANG BEOM PARK
-발급자:       Certum Code Signing 2021 CA
+받는 사람:  Open Source Developer KWANG BEOM PARK
+발급자:     Certum Code Signing 2021 CA
 ```
 
 **디지털 서명** 탭 자체가 없거나 이름이 다르면 여기서 배포한 파일이 아닙니다. 삭제하세요.
 
-**그래도 차단된다면** [AutoHotkey v2](https://www.autohotkey.com/)를 설치하고 `src/SwiftDeck.ahk`를 소스로 실행하세요. AutoHotkey 실행기 자체가 서명되어 있어 엄격한 정책에서도 동작합니다. 차단을 피하려고 Smart App Control을 끄지는 마세요 — **한 번 끄면 되돌릴 수 없고**, 운영체제를 다시 설치하지 않는 한 다시 켤 수 없습니다.
+**그래도 차단된다면** 서명이 있다는 점이 해결의 열쇠입니다. 전산 담당자에게 **게시자 기준으로 SwiftDeck을 허용해 달라고 요청하세요.** 위 인증서로 누가 서명했는지 확인할 수 있으며, 서명 없는 파일로는 불가능한 방법입니다.
+
+소스로 실행하는 방법도 많은 환경에서 통합니다. [AutoHotkey v2](https://www.autohotkey.com/)를 설치하고 `src/SwiftDeck.ahk`를 실행하면 됩니다. 다만 한계를 알고 쓰세요 — **AutoHotkey는 실행기를 서명 없이 배포합니다.** 널리 쓰이는 프로그램이라 Windows가 이미 신뢰하는 환경에서는 동작하지만, WDAC나 AppLocker로 게시자 허용 목록을 운영하는 곳에서는 통하지 않습니다. 그런 정책에서는 서명 없는 실행기야말로 차단 대상이고, 서명된 SwiftDeck 실행 파일을 허용해 달라고 요청하는 편이 맞습니다.
+
+어느 쪽이든 차단을 피하려고 Smart App Control을 끄지는 마세요 — **한 번 끄면 되돌릴 수 없고**, 운영체제를 다시 설치하지 않는 한 다시 켤 수 없습니다.
 
 ### 🔍 내려받은 파일 확인
 
