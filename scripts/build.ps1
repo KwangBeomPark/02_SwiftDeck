@@ -340,7 +340,7 @@ try {
             throw "GitHub CLI is not authenticated."
         }
 
-        & gh release view "v$version" *> $null
+        cmd /c "gh release view v$version >nul 2>&1"
         if ($LASTEXITCODE -eq 0) {
             throw "Release v$version already exists. Published releases are never replaced."
         }
