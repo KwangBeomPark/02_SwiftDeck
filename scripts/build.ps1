@@ -423,14 +423,20 @@ try {
             $generatedNotes
         ) -join "`n"
 
-        # Piped through stdin rather than passed as an argument. Windows
-        # PowerShell 5.1 does not escape double quotes inside a native argument:
-        # an even number of them is silently deleted and an odd number splits the
-        # argument outright, which would mangle or truncate the notes the moment a
-        # changelog entry quotes something.
-        $notes | & gh release edit "v$version" --notes-file -
-        if ($LASTEXITCODE -ne 0) {
-            Write-Warning "Could not set the release notes; the SHA256SUMS.txt asset is still attached."
+        # Written to a temporary UTF-8 file rather than piped via stdin. Windows
+        # PowerShell 5.1 pipes stdin in the console codepage (e.g. CP949), which
+        # mangles multibyte characters like Korean or smart quotes in the release notes.
+        $tempNotesFile = [System.IO.Path]::GetTempFileName()
+        try {
+            [System.IO.File]::WriteAllText($tempNotesFile, $notes, [System.Text.Encoding]::UTF8)
+            & gh release edit "v$version" --notes-file $tempNotesFile
+            if ($LASTEXITCODE -ne 0) {
+                Write-Warning "Could not set the release notes; the SHA256SUMS.txt asset is still attached."
+            }
+        } finally {
+            if (Test-Path -LiteralPath $tempNotesFile) {
+                Remove-Item -LiteralPath $tempNotesFile -Force
+            }
         }
 
         & gh release edit "v$version" --draft=false --latest
