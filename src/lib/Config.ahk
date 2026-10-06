@@ -1,5 +1,6 @@
 #Requires AutoHotkey v2.0
 #Include Utils.ahk
+#Include ..\SettingsManager.ahk
 ; NOTE: Global variables (g_targetFolder, g_filePath_*) are declared in SwiftDeck.ahk.
 ; =============================================================================
 ; --- Config File Initialization & Management ---
@@ -189,6 +190,7 @@ ConfigSetStartupEnabled(enabled, showMsg := true) {
     legacyLnk := A_Startup . "\FolderHotKey.lnk"
 
     try {
+        CleanLegacyShortcuts()
         if (enabled) {
             pendingLnk := A_Startup . "\SwiftDeck.pending." . A_TickCount . ".lnk"
             try {
@@ -206,6 +208,8 @@ ConfigSetStartupEnabled(enabled, showMsg := true) {
             if !FileExist(startupLnk)
                 throw Error("The startup shortcut is missing after registration.")
 
+            SafeWriteLocalSetting("1", "RunAtStartup")
+
             if (showMsg)
                 MsgBox("🚀 Auto-Start is enabled.`nSwiftDeck will run automatically when Windows starts.", "Startup Registration", 262208)
         } else {
@@ -216,6 +220,8 @@ ConfigSetStartupEnabled(enabled, showMsg := true) {
                 FileDelete(legacyLnk)
             if ConfigIsStartupEnabled()
                 throw Error("A startup shortcut could not be removed.")
+
+            SafeWriteLocalSetting("0", "RunAtStartup")
 
             if (showMsg) {
                 msg := hadShortcut
@@ -518,12 +524,39 @@ ConfigGetFallbackAppSettings() {
 
 ConfigReadAppSettings() {
     defaults := ConfigGetFallbackAppSettings()
+
+    mainHk := ""
+    if !TryReadLocalSetting("MainHotkey", &mainHk) || mainHk == ""
+        mainHk := ConfigReadValue("Settings", "Settings", "MainHotkey", defaults.MainHotkey)
+
+    promptMod := ""
+    if !TryReadLocalSetting("PromptModifier", &promptMod) || promptMod == ""
+        promptMod := ConfigReadValue("Settings", "Settings", "PromptModifier", defaults.PromptModifier)
+
+    promptNum := defaults.PromptUseNumpad
+    rawNum := ""
+    if TryReadLocalSetting("PromptUseNumpad", &rawNum) && rawNum != "" {
+        try promptNum := Integer(rawNum)
+        catch
+            promptNum := defaults.PromptUseNumpad
+    } else {
+        promptNum := ConfigReadNumber("Settings", "Settings", "PromptUseNumpad", defaults.PromptUseNumpad)
+    }
+
+    emojiHk := ""
+    if !TryReadLocalSetting("EmojiHotkey", &emojiHk) || emojiHk == ""
+        emojiHk := ConfigReadValue("Settings", "Settings", "EmojiHotkey", defaults.EmojiHotkey)
+
+    exitHk := ""
+    if !TryReadLocalSetting("ExitHotkey", &exitHk) || exitHk == ""
+        exitHk := ConfigReadValue("Settings", "Settings", "ExitHotkey", defaults.ExitHotkey)
+
     return {
-        MainHotkey: ConfigReadValue("Settings", "Settings", "MainHotkey", defaults.MainHotkey),
-        PromptModifier: ConfigReadValue("Settings", "Settings", "PromptModifier", defaults.PromptModifier),
-        PromptUseNumpad: ConfigReadNumber("Settings", "Settings", "PromptUseNumpad", defaults.PromptUseNumpad),
-        EmojiHotkey: ConfigReadValue("Settings", "Settings", "EmojiHotkey", defaults.EmojiHotkey),
-        ExitHotkey: ConfigReadValue("Settings", "Settings", "ExitHotkey", defaults.ExitHotkey)
+        MainHotkey: mainHk,
+        PromptModifier: promptMod,
+        PromptUseNumpad: promptNum,
+        EmojiHotkey: emojiHk,
+        ExitHotkey: exitHk
     }
 }
 
@@ -549,6 +582,15 @@ ConfigWriteAppSettings(mainHotkey, promptModifier, promptUseNumpad, emojiHotkey 
             ConfigWriteValue("Settings", "Settings", "EmojiHotkey", emojiHotkey)
         if (exitHotkey != "")
             ConfigWriteValue("Settings", "Settings", "ExitHotkey", exitHotkey)
+
+        ; Also synchronize to standardized UserSetting\config.ini
+        SafeWriteLocalSetting(mainHotkey, "MainHotkey")
+        SafeWriteLocalSetting(promptModifier, "PromptModifier")
+        SafeWriteLocalSetting(promptUseNumpad, "PromptUseNumpad")
+        if (emojiHotkey != "")
+            SafeWriteLocalSetting(emojiHotkey, "EmojiHotkey")
+        if (exitHotkey != "")
+            SafeWriteLocalSetting(exitHotkey, "ExitHotkey")
     } catch Error as err {
         ConfigRestoreRollbackCopy(configPath, rollbackPath)
         throw err

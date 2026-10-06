@@ -1,5 +1,6 @@
+[CmdletBinding()]
 param(
-    [switch]$Publish,
+    [string]$OutputDirectory = "release",
 
     # Skips the test gate. For getting an emergency build out when a test is
     # itself broken -- not for ignoring a real failure.
@@ -9,10 +10,6 @@ param(
     # certificate store once, then pass its thumbprint here:
     #
     #   .\scripts\build.ps1 -CertificateThumbprint AB12...CD
-    #
-    # Deliberately thumbprint-only: a .pfx path would mean handling its password,
-    # and the store keeps the private key out of the build command line and out
-    # of shell history. Without this the build is unsigned, exactly as before.
     [string]$CertificateThumbprint,
 
     [string]$TimestampUrl = "http://timestamp.digicert.com"
@@ -27,6 +24,8 @@ param(
 # whole script from parsing. Measured -- one em dash in a release-notes string
 # made build.ps1 fail to parse in its entirety.
 $ErrorActionPreference = "Stop"
+Set-StrictMode -Version Latest
+. (Join-Path $PSScriptRoot "Common.ps1")
 
 # Runs every tests\*Tests.ahk and fails the build if any of them does. Each
 # script exits non-zero on a failed assertion, and a load-time error leaves the
@@ -125,326 +124,245 @@ function Get-SigningCertificate {
         "then run: Get-ChildItem Cert:\CurrentUser\My -CodeSigningCert")
 }
 
+function Find-SignTool {
+    param([string]$ConfiguredPath = "")
+
+    if (-not [string]::IsNullOrWhiteSpace($ConfiguredPath)) {
+        return Resolve-ExistingFile $ConfiguredPath $ConfiguredPath "signtool.exe"
+    }
+    $onPath = Get-Command signtool.exe -ErrorAction SilentlyContinue
+    if ($null -ne $onPath) {
+        return $onPath.Source
+    }
+    $stepwiseSignTool = "C:\Dev\GitHub\06_Stepwise\release\build\signtool\signtool.exe"
+    if (Test-Path -LiteralPath $stepwiseSignTool -PathType Leaf) {
+        return $stepwiseSignTool
+    }
+    $programFilesX86 = ${env:ProgramFiles(x86)}
+    if ([string]::IsNullOrWhiteSpace($programFilesX86)) {
+        return $null
+    }
+    $kitsRoot = Join-Path $programFilesX86 "Windows Kits\10\bin"
+    if (-not (Test-Path -LiteralPath $kitsRoot)) {
+        return $null
+    }
+    $versionDirs = @(Get-ChildItem -LiteralPath $kitsRoot -Directory -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -match '^\d+(\.\d+){1,3}$' } |
+        Sort-Object { [version]$_.Name } -Descending)
+    foreach ($dir in $versionDirs) {
+        $candidate = Join-Path $dir.FullName "x64\signtool.exe"
+        if (Test-Path -LiteralPath $candidate -PathType Leaf) {
+            return $candidate
+        }
+    }
+    $legacy = Join-Path $kitsRoot "x64\signtool.exe"
+    if (Test-Path -LiteralPath $legacy -PathType Leaf) {
+        return $legacy
+    }
+    return $null
+}
+
 function Invoke-ArtifactSigning {
     param(
         [string[]]$Paths,
         $Certificate,
-        [string]$TimestampUrl
+        [string]$Thumbprint = "",
+        [string]$TimestampUrl = "http://time.certum.pl"
     )
 
+    $signtool = Find-SignTool
     foreach ($path in $Paths) {
-        # Timestamping is what lets the signature stay valid after the
-        # certificate itself expires, so a failure here is fatal, not a warning.
-        $result = Set-AuthenticodeSignature -FilePath $path -Certificate $Certificate `
-            -HashAlgorithm SHA256 -TimestampServer $TimestampUrl
-        if ($result.Status -ne "Valid") {
-            throw "Signing failed for $path : $($result.Status) - $($result.StatusMessage)"
-        }
-        # Status alone does not prove a timestamp was applied: an un-timestamped
-        # signature still reports Valid while the certificate is inside its
-        # validity window, and only stops validating years later, on machines
-        # nobody is watching. Check the countersignature itself.
-        if (-not $result.TimeStamperCertificate) {
-            throw ("No timestamp was applied to $path (server: $TimestampUrl). " +
-                "The signature would stop validating when the certificate expires.")
+        if ($signtool -and $Thumbprint) {
+            $signArgs = @(
+                "sign",
+                "/debug",
+                "/s", "my",
+                "/sha1", $Thumbprint,
+                "/fd", "sha256",
+                "/tr", $TimestampUrl,
+                "/td", "sha256",
+                "/d", "SwiftDeck"
+            )
+            $signArgs += $path
+            & $signtool $signArgs
+            if ($LASTEXITCODE -ne 0) {
+                throw "signtool signing failed for $path with exit code $LASTEXITCODE."
+            }
+        } elseif ($Certificate) {
+            $result = Set-AuthenticodeSignature -FilePath $path -Certificate $Certificate `
+                -HashAlgorithm SHA256 -TimestampServer $TimestampUrl
+            if ($result.Status -ne "Valid") {
+                throw "Signing failed for $path : $($result.Status) - $($result.StatusMessage)"
+            }
+        } else {
+            throw "Neither signtool/thumbprint nor certificate object available for signing $path."
         }
         Write-Host ("  signed: {0}" -f (Split-Path $path -Leaf))
     }
 }
 
-$repoRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot ".."))
-Push-Location $repoRoot
-try {
-    $ahkPath = Join-Path $repoRoot "src\SwiftDeck.ahk"
-    if (-not (Test-Path -LiteralPath $ahkPath)) {
-        throw "Could not find src/SwiftDeck.ahk"
+function Find-InnoSetupCompiler {
+    $onPath = Get-Command iscc.exe -ErrorAction SilentlyContinue
+    if ($null -ne $onPath) {
+        return $onPath.Source
     }
-
-    $ahkContent = Get-Content -LiteralPath $ahkPath -Raw
-    if ($ahkContent -notmatch 'global g_appVersion\s*:=\s*"([^"]+)"') {
-        throw "Could not find g_appVersion in the script."
-    }
-    $version = $Matches[1]
-    if ($version -notmatch '^\d+\.\d+\.\d+$') {
-        throw "g_appVersion must use X.Y.Z format."
-    }
-    if ($ahkContent -notmatch ';@Ahk2Exe-SetVersion\s+(\d+\.\d+\.\d+\.\d+)') {
-        throw "Could not find the Ahk2Exe file version directive."
-    }
-    $fileVersion = $Matches[1]
-    if ($fileVersion -ne "$version.0") {
-        throw "g_appVersion ($version) and file version ($fileVersion) do not match."
-    }
-
-    $compilerPath = "C:\Program Files\AutoHotkey\Compiler\Ahk2Exe.exe"
-    $baseAhk = "C:\Program Files\AutoHotkey\v2\AutoHotkey64.exe"
-    $iconPath = Join-Path $repoRoot "assets\SwiftDeck.ico"
-    foreach ($requiredPath in @($compilerPath, $baseAhk, $iconPath)) {
-        if (-not (Test-Path -LiteralPath $requiredPath)) {
-            throw "Required build dependency was not found: $requiredPath"
-        }
-    }
-
-    # Resolved here, with the other dependencies, so an unusable thumbprint stops
-    # the run before any existing release artifact is deleted or rebuilt.
-    $signingCertificate = $null
-    if ($CertificateThumbprint) {
-        $signingCertificate = Get-SigningCertificate -Thumbprint $CertificateThumbprint
-        Write-Host ("Signing certificate: {0}" -f $signingCertificate.Subject)
-        Write-Host ("  expires: {0:yyyy-MM-dd}" -f $signingCertificate.NotAfter)
-        if ($signingCertificate.NotAfter -lt (Get-Date)) {
-            throw "That code-signing certificate expired on $($signingCertificate.NotAfter.ToString('yyyy-MM-dd'))."
-        }
-    }
-
-    # Fail closed rather than warn. Publishing without a certificate used to be
-    # guarded only by Write-Warning, which does not stop the run and scrolls past
-    # inside the compile and hash output -- so a forgotten -CertificateThumbprint
-    # produced a published, unsigned, irreversible release. Checked here, before
-    # anything is deleted or rebuilt.
-    if ($Publish -and -not $signingCertificate) {
-        throw "Refusing to publish an unsigned release. Pass -CertificateThumbprint <thumbprint>."
-    }
-
-    # Before anything is deleted or built: a failing test should stop the run
-    # while the previous release artifacts are still intact.
-    if ($SkipTests) {
-        Write-Warning "Test gate skipped (-SkipTests)."
-    } else {
-        Invoke-TestSuite -TestsDir (Join-Path $repoRoot "tests") -Interpreter $baseAhk
-    }
-
-    $releaseDir = Join-Path $repoRoot "release"
-    $distDir = Join-Path $repoRoot "dist"
-    New-Item -ItemType Directory -Path $releaseDir -Force | Out-Null
-    New-Item -ItemType Directory -Path $distDir -Force | Out-Null
-
-    # The version-stamped .exe is the asset humans download from the Releases page.
-    # SwiftDeck.exe carries the identical bytes under the fixed name that updaters
-    # in v1.3.1 and earlier require, so auto-update keeps working across this change.
-    $versionedName = "SwiftDeck.v$version"
-    $releaseExe = Join-Path $releaseDir "$versionedName.exe"
-    $releaseZip = Join-Path $releaseDir "$versionedName.zip"
-    $compatExe = Join-Path $releaseDir "SwiftDeck.exe"
-    $releaseManifest = Join-Path $releaseDir "SwiftDeck.update.ini"
-    $releaseChecksums = Join-Path $releaseDir "SHA256SUMS.txt"
-    $localVersionedExe = Join-Path $distDir "$versionedName.exe"
-    # SwiftDeck.zip was the pre-v1.3.2 archive name and is no longer produced;
-    # clearing it keeps release/ from mixing versions when it is uploaded.
-    $retiredOutputs = @((Join-Path $releaseDir "SwiftDeck.zip"))
-    foreach ($ownedOutput in @($releaseExe, $releaseZip, $compatExe, $releaseManifest, $localVersionedExe) + $retiredOutputs) {
-        if (Test-Path -LiteralPath $ownedOutput) {
-            Remove-Item -LiteralPath $ownedOutput -Force
-        }
-    }
-
-    Write-Host "Building SwiftDeck v$version..."
-    $compile = Start-Process -FilePath $compilerPath -ArgumentList @(
-        "/in", "`"$ahkPath`"",
-        "/out", "`"$releaseExe`"",
-        "/icon", "`"$iconPath`"",
-        "/base", "`"$baseAhk`""
-    ) -Wait -PassThru
-    if ($compile.ExitCode -ne 0 -or -not (Test-Path -LiteralPath $releaseExe)) {
-        throw "Ahk2Exe compilation failed with exit code $($compile.ExitCode)."
-    }
-
-    # Order matters. Signing rewrites the executable, so it has to happen before
-    # the copies are taken and before the SHA-256 goes into the manifest --
-    # otherwise the updater would verify a digest of the unsigned bytes and
-    # reject every download.
-    if ($signingCertificate) {
-        Write-Host "Signing $versionedName.exe..."
-        Invoke-ArtifactSigning -Paths @($releaseExe) -Certificate $signingCertificate -TimestampUrl $TimestampUrl
-    }
-    elseif ($Publish) {
-        # Not just a SmartScreen warning. Smart App Control, which is on by
-        # default on clean Windows 11 installs, refuses to run an unsigned binary
-        # with no reputation at all -- measured on this machine: the freshly built
-        # exe was blocked outright (Event 3077) while an older copy still ran.
-        # A user in that state cannot click through; they have to turn the
-        # feature off, which is one-way, or run from source.
-        Write-Warning "Publishing an UNSIGNED release. SmartScreen will warn on first run, and Smart App Control will block it outright where it is enabled."
-    }
-
-    Compress-Archive -LiteralPath $releaseExe -DestinationPath $releaseZip -CompressionLevel Optimal
-    Copy-Item -LiteralPath $releaseExe -Destination $compatExe -Force
-    Copy-Item -LiteralPath $releaseExe -Destination $localVersionedExe -Force
-
-    $releaseHash = (Get-FileHash -LiteralPath $releaseExe -Algorithm SHA256).Hash.ToUpperInvariant()
-    $releaseSize = (Get-Item -LiteralPath $releaseExe).Length
-    $manifestLines = @(
-        "[Release]",
-        "Version=$version",
-        "Asset=SwiftDeck.exe",
-        "AssetVersioned=$versionedName.exe",
-        "Sha256=$releaseHash",
-        "Size=$releaseSize"
+    $candidates = @(
+        (Join-Path $env:LOCALAPPDATA "Programs\Inno Setup 6\ISCC.exe"),
+        (Join-Path ${env:ProgramFiles(x86)} "Inno Setup 6\ISCC.exe"),
+        (Join-Path $env:ProgramFiles "Inno Setup 6\ISCC.exe")
     )
-    Set-Content -LiteralPath $releaseManifest -Value $manifestLines -Encoding utf8
-
-    # Drop version-stamped artifacts left behind by earlier builds so the release
-    # folder only ever holds the assets for the version just built.
-    Get-ChildItem -LiteralPath $releaseDir -File |
-        Where-Object {
-            $_.Name -match '^SwiftDeck\.v\d+\.\d+\.\d+\.(exe|zip)$' -and
-            $_.Name -ne "$versionedName.exe" -and $_.Name -ne "$versionedName.zip"
-        } |
-        Remove-Item -Force
-
-    # The manifest advertises one digest for both executables, and the updater
-    # falls back from the versioned name to SwiftDeck.exe. If those two ever
-    # differ the fallback would fail SHA-256 verification, so assert it here
-    # rather than discovering it from a user's failed update.
-    $compatHash = (Get-FileHash -LiteralPath $compatExe -Algorithm SHA256).Hash.ToUpperInvariant()
-    if ($compatHash -ne $releaseHash) {
-        throw "SwiftDeck.exe and $versionedName.exe differ; the manifest digest would only match one of them."
+    foreach ($cand in $candidates) {
+        if (Test-Path -LiteralPath $cand -PathType Leaf) {
+            return $cand
+        }
     }
-
-    $signature = Get-AuthenticodeSignature -LiteralPath $releaseExe
-    $compatSignature = Get-AuthenticodeSignature -LiteralPath $compatExe
-    if ($signature.Status -ne $compatSignature.Status) {
-        throw "Signature state differs between the two executables: $($signature.Status) vs $($compatSignature.Status)."
-    }
-
-    # A digest for every published asset, not just the executable the updater
-    # checks. An unsigned download is exactly the case where a user has no way to
-    # tell the file apart from something that replaced it in transit, so the
-    # checksums have to cover the .zip as well and ship as their own asset.
-    # Written as plain "<hash>  <name>" lines with no header and no BOM, so the
-    # file is usable as-is by both Get-FileHash comparison and "sha256sum -c".
-    # Set-Content -Encoding utf8 writes a BOM on Windows PowerShell 5.1, which
-    # would corrupt the first line for the latter; the content is ASCII anyway.
-    $checksumTargets = Get-Item -LiteralPath $releaseExe, $releaseZip, $compatExe
-    $checksumLines = $checksumTargets | ForEach-Object {
-        "{0}  {1}" -f (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToUpperInvariant(), $_.Name
-    }
-    Set-Content -LiteralPath $releaseChecksums -Value $checksumLines -Encoding ascii
-
-    Write-Host "Build completed:"
-    Get-Item -LiteralPath $releaseExe, $releaseZip, $compatExe, $releaseManifest, $releaseChecksums, $localVersionedExe |
-        Select-Object FullName, Length
-    Write-Host "SHA256: $releaseHash"
-    Write-Host "Checksums for the release body:"
-    Get-Content -LiteralPath $releaseChecksums | ForEach-Object { Write-Host "  $_" }
-    if ($signature.Status -eq "Valid") {
-        Write-Host ("Signature: Valid - {0}" -f $signature.SignerCertificate.Subject)
-    } else {
-        Write-Host "Signature: $($signature.Status) (unsigned build)"
-    }
-
-    if ($Publish) {
-        Write-Host "Publishing GitHub Release v$version..."
-        & gh auth status | Out-Null
-        if ($LASTEXITCODE -ne 0) {
-            throw "GitHub CLI is not authenticated."
-        }
-
-        cmd /c "gh release view v$version >nul 2>&1"
-        if ($LASTEXITCODE -eq 0) {
-            throw "Release v$version already exists. Published releases are never replaced."
-        }
-
-        $gitStatus = & git status --porcelain
-        if ($gitStatus) {
-            throw "The Git worktree must be clean before publishing a release."
-        }
-        # A failed fetch leaves refs/remotes/origin/main at whatever it held
-        # before, so the comparison below would validate against a stale snapshot
-        # of the remote and report nothing. Every other external call in this
-        # block checks its exit code; this one used to be the gap.
-        & git fetch origin main | Out-Null
-        if ($LASTEXITCODE -ne 0) {
-            throw "Could not fetch origin/main; the local remote-tracking ref may be stale."
-        }
-        $localHead = (& git rev-parse HEAD).Trim()
-        $remoteHead = (& git rev-parse origin/main).Trim()
-        if ($localHead -ne $remoteHead) {
-            throw "Local main and origin/main must match before publishing."
-        }
-
-        # --target takes the verified SHA, not the branch name. A draft creates no
-        # tag; GitHub creates it only when the draft is published, resolving the
-        # target at that moment -- so "main" would tag whatever main points at
-        # then, not the commit whose artifacts were just built and checked.
-        & gh release create "v$version" $releaseExe $releaseZip $compatExe $releaseManifest $releaseChecksums `
-            --draft --target $localHead --title "SwiftDeck v$version" --generate-notes
-        if ($LASTEXITCODE -ne 0) {
-            throw "Could not create the draft GitHub Release."
-        }
-
-        # Write the release body ourselves. --generate-notes builds its notes from
-        # merged pull requests, and this repository has never had one: the v1.3.1
-        # release page carries a single compare link and nothing else. So the
-        # notes start from this version's CHANGELOG section -- the only place that
-        # actually describes what changed -- then the generated compare link, then
-        # the digests, so nobody has to open a second file to check the first.
-        $generatedNotes = & gh release view "v$version" --json body -q .body
-        if ($LASTEXITCODE -ne 0) {
-            $generatedNotes = ""
-            Write-Warning "Could not read the generated release notes; publishing without the compare link."
-        }
-
-        $changelogSection = ""
-        $changelogPath = Join-Path $repoRoot "CHANGELOG.md"
-        if (Test-Path -LiteralPath $changelogPath) {
-            $lines = Get-Content -LiteralPath $changelogPath
-            $start = -1
-            for ($i = 0; $i -lt $lines.Count; $i++) {
-                if ($lines[$i] -eq "## $version" -or $lines[$i] -like "## $version *") { $start = $i; break }
-            }
-            if ($start -ge 0) {
-                $end = $lines.Count
-                for ($i = $start + 1; $i -lt $lines.Count; $i++) {
-                    if ($lines[$i] -like "## *") { $end = $i; break }
-                }
-                # Drop the "## <version>" heading itself; the release is titled already.
-                $changelogSection = ($lines[($start + 1)..($end - 1)] -join "`n").Trim()
-            }
-        }
-        if (-not $changelogSection) {
-            Write-Warning "No CHANGELOG.md section found for $version; the release notes will not describe the changes."
-        }
-
-        $digestBlock = (Get-Content -LiteralPath $releaseChecksums) -join "`n"
-        $notes = @(
-            $changelogSection,
-            "",
-            "## Verifying this download",
-            "",
-            "This build is code-signed. Check the publisher in the file's **Properties -> Digital Signatures** tab before running it, or compare a digest:",
-            "",
-            "``````",
-            $digestBlock,
-            "``````",
-            "",
-            "``Get-FileHash .\<file> -Algorithm SHA256``. ``SwiftDeck.exe`` is a byte-identical copy of the version-stamped executable, kept so the updater in v1.3.1 and earlier keeps working.",
-            "",
-            $generatedNotes
-        ) -join "`n"
-
-        # Written to a temporary UTF-8 file rather than piped via stdin. Windows
-        # PowerShell 5.1 pipes stdin in the console codepage (e.g. CP949), which
-        # mangles multibyte characters like Korean or smart quotes in the release notes.
-        $tempNotesFile = [System.IO.Path]::GetTempFileName()
-        try {
-            [System.IO.File]::WriteAllText($tempNotesFile, $notes, [System.Text.Encoding]::UTF8)
-            & gh release edit "v$version" --notes-file $tempNotesFile
-            if ($LASTEXITCODE -ne 0) {
-                Write-Warning "Could not set the release notes; the SHA256SUMS.txt asset is still attached."
-            }
-        } finally {
-            if (Test-Path -LiteralPath $tempNotesFile) {
-                Remove-Item -LiteralPath $tempNotesFile -Force
-            }
-        }
-
-        & gh release edit "v$version" --draft=false --latest
-        if ($LASTEXITCODE -ne 0) {
-            throw "Could not publish GitHub Release v$version."
-        }
-        Write-Host "Published GitHub Release v$version."
-    }
-} finally {
-    Pop-Location
+    return $null
 }
+
+$repoRoot = Split-Path -Parent $PSScriptRoot
+$ahkPath = Join-Path $repoRoot "src\SwiftDeck.ahk"
+if (-not (Test-Path -LiteralPath $ahkPath)) {
+    throw "Could not find src/SwiftDeck.ahk"
+}
+
+$ahkContent = Get-Content -LiteralPath $ahkPath -Raw
+if ($ahkContent -notmatch 'global g_appVersion\s*:=\s*"([^"]+)"') {
+    throw "Could not find g_appVersion in the script."
+}
+$version = $Matches[1]
+if ($version -notmatch '^\d+\.\d+\.\d+$') {
+    throw "g_appVersion must use X.Y.Z format."
+}
+if ($ahkContent -notmatch ';@Ahk2Exe-SetVersion\s+(\d+\.\d+\.\d+\.\d+)') {
+    throw "Could not find the Ahk2Exe file version directive."
+}
+$fileVersion = $Matches[1]
+if ($fileVersion -ne "$version.0") {
+    throw "g_appVersion ($version) and file version ($fileVersion) do not match."
+}
+
+$compilerPath = "C:\Program Files\AutoHotkey\Compiler\Ahk2Exe.exe"
+$baseAhk = "C:\Program Files\AutoHotkey\v2\AutoHotkey64.exe"
+$iconPath = Join-Path $repoRoot "assets\SwiftDeck.ico"
+foreach ($requiredPath in @($compilerPath, $baseAhk, $iconPath)) {
+    if (-not (Test-Path -LiteralPath $requiredPath)) {
+        throw "Required build dependency was not found: $requiredPath"
+    }
+}
+
+# Resolved here, with the other dependencies, so an unusable thumbprint stops
+# the run before any existing release artifact is deleted or rebuilt.
+$signingCertificate = $null
+if ($CertificateThumbprint) {
+    $signingCertificate = Get-SigningCertificate -Thumbprint $CertificateThumbprint
+    Write-Host ("Signing certificate: {0}" -f $signingCertificate.Subject)
+    Write-Host ("  expires: {0:yyyy-MM-dd}" -f $signingCertificate.NotAfter)
+    if ($signingCertificate.NotAfter -lt (Get-Date)) {
+        throw "That code-signing certificate expired on $($signingCertificate.NotAfter.ToString('yyyy-MM-dd'))."
+    }
+}
+
+# Before anything is deleted or built: a failing test should stop the run
+# while the previous release artifacts are still intact.
+if ($SkipTests) {
+    Write-Warning "Test gate skipped (-SkipTests)."
+} else {
+    Invoke-TestSuite -TestsDir (Join-Path $repoRoot "tests") -Interpreter $baseAhk
+}
+
+$targetOutputDir = Resolve-RepoPath $repoRoot $OutputDirectory
+New-Item -ItemType Directory -Path $targetOutputDir -Force | Out-Null
+
+$versionedName = "SwiftDeck.v$version"
+$localVersionedExe = Join-Path $targetOutputDir "$versionedName.exe"
+$versionedZip = Join-Path $targetOutputDir "$versionedName.zip"
+$setupExe = Join-Path $targetOutputDir "SwiftDeck-Setup.v$version.exe"
+$enterpriseSetup = Join-Path $targetOutputDir "App02_SwiftDeck-Setup_v$version.exe"
+$releaseChecksums = Join-Path $targetOutputDir "SHA256SUMS.txt"
+$manifestPath = Join-Path $targetOutputDir "build-manifest.json"
+
+# Clean previous build artifacts in target output directory
+foreach ($ownedOutput in @($localVersionedExe, $versionedZip, $setupExe, $enterpriseSetup, $releaseChecksums, $manifestPath)) {
+    if (Test-Path -LiteralPath $ownedOutput) {
+        Remove-Item -LiteralPath $ownedOutput -Force
+    }
+}
+
+Write-Host "[1/4] Building SwiftDeck v$version with Ahk2Exe..."
+$compile = Start-Process -FilePath $compilerPath -ArgumentList @(
+    "/in", "`"$ahkPath`"",
+    "/out", "`"$localVersionedExe`"",
+    "/icon", "`"$iconPath`"",
+    "/base", "`"$baseAhk`""
+) -Wait -PassThru
+if ($compile.ExitCode -ne 0 -or -not (Test-Path -LiteralPath $localVersionedExe)) {
+    throw "Ahk2Exe compilation failed with exit code $($compile.ExitCode)."
+}
+
+    if ($CertificateThumbprint) {
+        Write-Host "Signing $versionedName.exe..."
+        Invoke-ArtifactSigning -Paths @($localVersionedExe) -Certificate $signingCertificate -Thumbprint $CertificateThumbprint -TimestampUrl $TimestampUrl
+    } else {
+        Write-Host "  (Executable is unsigned; run release.ps1 to build and sign with Certum/SimplySign)" -ForegroundColor Yellow
+    }
+
+    # Create portable zip package
+    if (Test-Path -LiteralPath $versionedZip) { Remove-Item -LiteralPath $versionedZip -Force }
+    Compress-Archive -LiteralPath $localVersionedExe -DestinationPath $versionedZip -Force
+
+    Write-Host "[2/4] Building Per-User Windows Installer with Inno Setup..."
+    $iscc = Find-InnoSetupCompiler
+    if ($null -eq $iscc) {
+        throw "Inno Setup compiler (ISCC.exe) was not found. Please install Inno Setup 6."
+    }
+    $setupIssPath = Join-Path $repoRoot "installer\setup.iss"
+    $isccArgs = @("/DMyAppVersion=$version", "/DMyAppExeSource=$localVersionedExe", "/O$targetOutputDir", "`"$setupIssPath`"")
+    Write-Host "  Compiling: $iscc $isccArgs"
+    $compileInstaller = Start-Process -FilePath $iscc -ArgumentList $isccArgs -Wait -PassThru -NoNewWindow
+    if ($compileInstaller.ExitCode -ne 0 -or -not (Test-Path -LiteralPath $setupExe)) {
+        throw "Inno Setup compilation failed with exit code $($compileInstaller.ExitCode)."
+    }
+
+    # Generate enterprise alias installer
+    Copy-Item -LiteralPath $setupExe -Destination $enterpriseSetup -Force
+
+    if ($CertificateThumbprint) {
+        Write-Host "Signing installer binaries..."
+        Invoke-ArtifactSigning -Paths @($setupExe, $enterpriseSetup) -Certificate $signingCertificate -Thumbprint $CertificateThumbprint -TimestampUrl $TimestampUrl
+    }
+
+Write-Host "[3/4] Preparing release artifacts..."
+$artifactPaths = [System.Collections.Generic.List[string]]::new()
+$artifactPaths.Add($setupExe)
+$artifactPaths.Add($enterpriseSetup)
+$artifactPaths.Add($localVersionedExe)
+$artifactPaths.Add($versionedZip)
+
+$artifactInfo = foreach ($path in $artifactPaths) {
+    $item = Get-Item -LiteralPath $path
+    $hash = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant()
+    [pscustomobject]@{
+        name   = $item.Name
+        bytes  = $item.Length
+        sha256 = $hash
+    }
+}
+
+$utf8NoBom = [Text.UTF8Encoding]::new($false)
+$checksumLines = @($artifactInfo | ForEach-Object { "$($_.sha256)  $($_.name)" })
+[IO.File]::WriteAllText($releaseChecksums, (($checksumLines -join "`n") + "`n"), $utf8NoBom)
+
+$manifest = [ordered]@{
+    application      = "SwiftDeck"
+    version          = $version
+    fileVersion      = "$version.0"
+    builtAtUtc       = [DateTime]::UtcNow.ToString("o")
+    artifacts        = @($artifactInfo)
+}
+[IO.File]::WriteAllText($manifestPath, (($manifest | ConvertTo-Json -Depth 5) + "`n"), $utf8NoBom)
+
+Write-Host "`n[4/4] Build completed successfully: $targetOutputDir" -ForegroundColor Green
+Get-Item -LiteralPath (@($artifactPaths) + @($releaseChecksums, $manifestPath)) |
+    Select-Object Name, Length
+Write-Host "`nChecksums:"
+Get-Content -LiteralPath $releaseChecksums | ForEach-Object { Write-Host "  $_" }

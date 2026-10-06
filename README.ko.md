@@ -30,19 +30,17 @@
 
 ---
 
-## 🚀 다운로드 및 실행 방법
+## 🚀 다운로드 및 설치 방법 (원클릭 인스톨러)
 
-**SwiftDeck**은 별도 설치 없이 실행 파일을 더블 클릭하여 사용하는 **무설치 포터블 프로그램**입니다.
+**SwiftDeck**은 UAC 관리자 권한 승인 없이 일반 사내 PC에서도 즉시 설치할 수 있는 **표준 사용자 설치 프로그램(`SwiftDeck-Setup.vX.Y.Z.exe`)**으로 단일 배포됩니다.
 
-### 📥 일반 팀원용 원클릭 다운로드
+### 📥 원클릭 설치 가이드
 
-1. 깃허브 화면 우측의 **[Releases](https://github.com/KwangBeomPark/02_SwiftDeck/releases)** 탭으로 이동합니다.
-2. 최신 릴리즈의 **`SwiftDeck.vX.Y.Z.zip`** 또는 **`SwiftDeck.vX.Y.Z.exe`** 단독 실행 파일을 다운로드합니다. (예: `SwiftDeck.v1.4.0.exe`)
-3. 필요한 경우 압축을 풀고 내려받은 `.exe`를 더블 클릭합니다.
-   각 릴리즈에는 내용이 같은 `SwiftDeck.exe`도 함께 올라갑니다. v1.3.1 이하 버전의 자동 업데이트가 이 이름을 사용합니다.
-4. Windows 우측 하단 시스템 트레이에 검은색 번개 아이콘이 표시되면 바로 사용할 수 있습니다.
-
-아직 릴리즈 파일이 등록되지 않은 경우, AutoHotkey v2로 `src/SwiftDeck.ahk`를 직접 실행하거나 빌드해 주세요.
+1. GitHub 화면 우측의 **[Releases](https://github.com/KwangBeomPark/02_SwiftDeck/releases)** 탭으로 이동합니다.
+2. 최신 릴리즈의 설치 파일 **`SwiftDeck-Setup.vX.Y.Z.exe`** (사내 배포 시 `App02_SwiftDeck-Setup_vX.Y.Z.exe`)를 다운로드합니다.
+3. 내려받은 설치 파일을 실행하면 관리자 권한 팝업 없이 `%LOCALAPPDATA%\Programs\SwiftDeck`에 즉시 자동 설치됩니다.
+4. 구버전 바로가기와 잔여 설정은 자동으로 정리되며, 사용자 설정(`UserSetting\config.ini`)은 업데이트 및 삭제 시에도 안전하게 보존됩니다.
+5. 설치 완료 후 시작 메뉴, 바탕화면 바로가기 또는 시스템 트레이 아이콘을 통해 즉시 사용할 수 있습니다.
 
 ### 🛡️ Windows가 띄우는 경고
 
@@ -76,12 +74,10 @@
 서명만으로도 실행 파일이 변조되지 않았음은 확인됩니다. 다만 `.zip`에는 서명이 없고, 인증서 창을 여는 것보다 해시 비교가 빠릅니다. 릴리즈마다 파일별 해시를 담은 `SHA256SUMS.txt`를 함께 올립니다.
 
 ```powershell
-Get-FileHash .\SwiftDeck.v1.4.0.exe -Algorithm SHA256
+Get-FileHash .\SwiftDeck-Setup.v1.4.1.exe -Algorithm SHA256
 ```
 
 출력된 해시가 `SHA256SUMS.txt`의 해당 파일 줄과 같아야 합니다. 다르면 파일을 지우고 다시 내려받으세요.
-
-`SwiftDeck.exe`와 `SwiftDeck.vX.Y.Z.exe`는 같은 빌드의 바이트 단위로 동일한 사본이라(고정 이름은 v1.3.1 이하의 자동 업데이트 호환용) 해시도 같습니다.
 
 ### 🔄 자동 업데이트
 

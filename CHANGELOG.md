@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.4.1 — 2026-10-06
+
+### PL Suite 표준화 및 배포 파이프라인 정비 (Packaging & Architecture Modernization)
+
+- **PL Suite 표준 디렉터리 구조 일치**: `01_ClipOCR-Pro`와 동일한 `docs/`(표준 릴리즈 문서), `tools/`(로컬 도구/테스트 인증서 격리 보관소), `.github/workflows/`(CI 자동 빌드) 체계를 적용했습니다.
+- **결정적 빌드 및 줄바꿈 보장**: `.gitattributes`를 도입하여 모든 체크아웃에서 LF 줄바꿈을 강제하고 이미지/바이너리 자산을 명시하여 CI와 로컬 빌드 간 해시 일치를 보장합니다.
+- **인스톨러 동적 매크로 주입**: Inno Setup 스크립트(`installer/setup.iss`)에 `#ifndef MyAppExeSource`를 적용하여 빌드 환경에 따라 실행 파일 소스를 유연하게 주입할 수 있도록 개선했습니다.
+- **빌드 및 배포 파이프라인 분리**: `scripts/build.ps1`의 아티팩트 중복 생성을 제거하고, GitHub Release 배포 자동화를 전용 스크립트인 `scripts/publish.ps1`로 분리했습니다.
+- **공식 릴리즈 아티팩트 단일화**: 임시 워킹 디렉터리(`dist/`)와 배포 디렉터리(`release/`) 간의 중복을 해소하고 최신 4종 세트(인스톨러 2종, 포터블 실행/압축 2종, 체크섬, 매니페스트)로 일원화했습니다.
+
 ## 1.4.0 — 2026-09-09
 
 ### Release summary (English)

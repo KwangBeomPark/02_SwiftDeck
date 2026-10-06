@@ -1,17 +1,33 @@
-.vscode/
-Backups/
+# Compiled binaries (Recommended to upload to GitHub Releases instead of tracking in Git)
+*.exe
+*.zip
+*.cer
+*.pfx
 dist/
-release/
 build/
+release/
 out/
-SwiftDeck.exe
-SwiftDeck.zip
-test_json.ahk
-test_json_out.txt
+
+# Local editor settings
+.vscode/
+
+# Local tools and certs isolation
+tools/
+Backups/
+
+# Windows temporary / system files
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# Temporary files, logs, backups
 *.bak
 *.tmp
 *.log
 *.lnk
+test_json.ahk
+test_json_out.txt
 *.updater-*.exe
 *.update-*.ok
 App02_*DoNotDelete.ini
@@ -22,3 +38,6 @@ App02_*DoNotDelete.ini.bak
 AGENTS.md
 AI_CODE_MAP.md
 myAGENT.md
+
+# Enterprise configuration is maintained only in ../00_Registry
+ENTERPRISE_SUITE_REGISTRY_SPEC.md

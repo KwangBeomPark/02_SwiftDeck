@@ -30,19 +30,17 @@ It is designed especially for finance, sales administration, accounting, credit 
 
 ---
 
-## 🚀 Download & Quick Start
+## 🚀 Download & Installation (One-Click Installer)
 
-**SwiftDeck** is a **portable application**. It runs by double-clicking the executable and does not require installation.
+**SwiftDeck** is distributed as a **standard per-user Windows installer (`SwiftDeck-Setup.vX.Y.Z.exe`)**, which requires NO administrator privileges (UAC elevation) and installs cleanly on corporate PCs.
 
-### 📥 For General Users (1-Click Portable Download)
+### 📥 One-Click Installation Guide
 
-1. Go to the **[Releases](https://github.com/KwangBeomPark/02_SwiftDeck/releases)** tab on the right side of the GitHub repository.
-2. Download the latest **`SwiftDeck.vX.Y.Z.zip`** or standalone **`SwiftDeck.vX.Y.Z.exe`** file (for example `SwiftDeck.v1.4.0.exe`).
-3. Unzip the file if needed, then double-click the downloaded `.exe`.
-   Each release also ships an identical `SwiftDeck.exe` under the fixed name, which the built-in updater in v1.3.1 and earlier relies on.
-4. A black lightning bolt icon will appear in the Windows system tray — SwiftDeck is ready to use.
-
-If no release file is available yet, please build or run `src/SwiftDeck.ahk` using AutoHotkey v2.
+1. Go to the **[Releases](https://github.com/KwangBeomPark/02_SwiftDeck/releases)** tab on GitHub.
+2. Download the latest installer **`SwiftDeck-Setup.vX.Y.Z.exe`** (or `App02_SwiftDeck-Setup_vX.Y.Z.exe` for enterprise distribution).
+3. Run the installer. It will automatically install to `%LOCALAPPDATA%\Programs\SwiftDeck` without requiring UAC approval.
+4. Legacy shortcuts and Run registry keys will be cleanly removed, while your custom settings (`UserSetting\config.ini`) are strictly preserved across updates and uninstallation.
+5. Launch SwiftDeck from the Start Menu, Desktop shortcut, or system tray.
 
 ### 🛡️ What Windows Will Say
 
@@ -76,12 +74,10 @@ Either way, do not turn Smart App Control off to work around a block: it is a **
 The signature already tells you the executable is unaltered, but the `.zip` is not signed and a digest is quicker to compare than a certificate dialog. Every release ships a `SHA256SUMS.txt` asset listing a digest for each file:
 
 ```powershell
-Get-FileHash .\SwiftDeck.v1.4.0.exe -Algorithm SHA256
+Get-FileHash .\SwiftDeck-Setup.v1.4.1.exe -Algorithm SHA256
 ```
 
 The printed hash must match the line for that filename in `SHA256SUMS.txt`. If it does not, delete the file and download it again.
-
-`SwiftDeck.exe` and `SwiftDeck.vX.Y.Z.exe` are byte-identical copies of the same build — the fixed name exists only so that the updater in v1.3.1 and earlier keeps working — so their digests are the same by design.
 
 ### 🔄 Automatic Updates
 
