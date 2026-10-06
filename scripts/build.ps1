@@ -1,6 +1,8 @@
 [CmdletBinding()]
 param(
-    [string]$OutputDirectory = "release",
+    [string]$OutputDirectory = "dist",
+    [string]$AutoHotkeyPath = $env:AUTOHOTKEY_EXE_PATH,
+    [string]$CompilerPath = $env:AHK2EXE_PATH,
 
     # Skips the test gate. For getting an emergency build out when a test is
     # itself broken -- not for ignoring a real failure.
@@ -12,7 +14,9 @@ param(
     #   .\scripts\build.ps1 -CertificateThumbprint AB12...CD
     [string]$CertificateThumbprint,
 
-    [string]$TimestampUrl = "http://timestamp.digicert.com"
+    [string]$TimestampUrl = "http://time.certum.pl",
+
+    [switch]$Publish
 )
 
 # SwiftDeck build, packaging, and optional GitHub Release publishing pipeline.
@@ -209,7 +213,8 @@ function Find-InnoSetupCompiler {
     $candidates = @(
         (Join-Path $env:LOCALAPPDATA "Programs\Inno Setup 6\ISCC.exe"),
         (Join-Path ${env:ProgramFiles(x86)} "Inno Setup 6\ISCC.exe"),
-        (Join-Path $env:ProgramFiles "Inno Setup 6\ISCC.exe")
+        (Join-Path $env:ProgramFiles "Inno Setup 6\ISCC.exe"),
+        "C:\ProgramData\Chocolatey\bin\ISCC.exe"
     )
     foreach ($cand in $candidates) {
         if (Test-Path -LiteralPath $cand -PathType Leaf) {
@@ -217,6 +222,20 @@ function Find-InnoSetupCompiler {
         }
     }
     return $null
+}
+
+function Resolve-ExistingFile {
+    param([string]$ConfiguredPath, [string[]]$CandidatePaths, [string]$Description)
+
+    if (-not [string]::IsNullOrWhiteSpace($ConfiguredPath) -and (Test-Path -LiteralPath $ConfiguredPath -PathType Leaf)) {
+        return $ConfiguredPath
+    }
+    foreach ($cand in $CandidatePaths) {
+        if (Test-Path -LiteralPath $cand -PathType Leaf) {
+            return $cand
+        }
+    }
+    throw "Required build dependency was not found ($Description): $ConfiguredPath"
 }
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
@@ -241,13 +260,20 @@ if ($fileVersion -ne "$version.0") {
     throw "g_appVersion ($version) and file version ($fileVersion) do not match."
 }
 
-$compilerPath = "C:\Program Files\AutoHotkey\Compiler\Ahk2Exe.exe"
-$baseAhk = "C:\Program Files\AutoHotkey\v2\AutoHotkey64.exe"
+$compilerCandidates = @(
+    "C:\Program Files\AutoHotkey\Compiler\Ahk2Exe.exe",
+    (Join-Path $env:LOCALAPPDATA "Programs\AutoHotkey\Compiler\Ahk2Exe.exe")
+)
+$ahkCandidates = @(
+    "C:\Program Files\AutoHotkey\v2\AutoHotkey64.exe",
+    (Join-Path $env:LOCALAPPDATA "Programs\AutoHotkey\v2\AutoHotkey64.exe")
+)
+
+$compilerPath = Resolve-ExistingFile $CompilerPath $compilerCandidates "Ahk2Exe compiler"
+$baseAhk = Resolve-ExistingFile $AutoHotkeyPath $ahkCandidates "AutoHotkey v2 runtime"
 $iconPath = Join-Path $repoRoot "assets\SwiftDeck.ico"
-foreach ($requiredPath in @($compilerPath, $baseAhk, $iconPath)) {
-    if (-not (Test-Path -LiteralPath $requiredPath)) {
-        throw "Required build dependency was not found: $requiredPath"
-    }
+if (-not (Test-Path -LiteralPath $iconPath)) {
+    throw "Required build dependency was not found: $iconPath"
 }
 
 # Resolved here, with the other dependencies, so an unusable thumbprint stops
