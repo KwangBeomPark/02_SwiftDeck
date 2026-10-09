@@ -1,9 +1,10 @@
-#Requires AutoHotkey v2.0
+﻿#Requires AutoHotkey v2.0
 #Include _TestHarness.ahk
 #Include ..\src\SettingsManager.ahk
 
 ; Isolate test directory in temp
 global testDir := A_Temp . "\swiftdeck-settings-test-" . A_TickCount
+global REG_PATH := "HKCU\Software\SwiftDeck-Tests-NoUserSettings\" . DllCall("GetCurrentProcessId")
 global CONFIG_DIR := testDir
 global CONFIG_FILE := testDir . "\config.ini"
 
@@ -29,11 +30,11 @@ try {
     AssertEqual(readVal, testVal, "Roundtrip value matches")
 
     ; Test 3: EnsureSettingsMigration logic
-    ; If config.ini exists, EnsureSettingsMigration returns false (does not overwrite)
+    ; An existing config with no legacy registry values is unchanged.
     AssertEqual(EnsureSettingsMigration(), false, "EnsureSettingsMigration skips when config.ini exists")
 } finally {
     if DirExist(testDir) {
-        try DirDelete(testDir, 1)
+        try TestFinishDirectory(testDir)
     }
 }
 

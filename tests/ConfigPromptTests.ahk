@@ -1,11 +1,11 @@
-#Requires AutoHotkey v2.0
+﻿#Requires AutoHotkey v2.0
 #Warn All, Off
 ; Round-trips prompt text through the real Config codec, and checks that a file
 ; written by an older version still reads the way it always did.
 
 global g_out := A_Temp . "\swiftdeck-prompt-tests.txt"
 global g_failures := 0
-global g_targetFolder := A_Temp . "\swiftdeck-prompt-tests\"
+global g_targetFolder := A_Temp . "\swiftdeck-prompt-tests-" . DllCall("GetCurrentProcessId") . "-" . A_TickCount . "\"
 global g_fileName_Folder := "App02_01FavFolderSetting_v2_DoNotDelete.ini"
 global g_fileName_Hotkey := "App02_02HotkeySetting_v2_DoNotDelete.ini"
 global g_fileName_Hotstring := "App02_03HotstringSetting_DoNotDelete.ini"
@@ -22,6 +22,10 @@ OnError(Report)
 SetTimer(Run_, -200)
 
 #Include ..\src\lib\Config.ahk
+#Include _FixtureIsolation.ahk
+global CONFIG_DIR := RTrim(g_targetFolder, "\")
+global CONFIG_FILE := g_targetFolder . "config.ini"
+global REG_PATH := "HKCU\Software\SwiftDeck-Tests-NoUserSettings\" . DllCall("GetCurrentProcessId")
 
 Log(line) {
     FileAppend(line . "`n", g_out, "UTF-8")
@@ -56,7 +60,7 @@ Visible(text) {
 
 Fresh() {
     if DirExist(g_targetFolder)
-        DirDelete(g_targetFolder, true)
+        TestFinishDirectory(g_targetFolder)
     DirCreate(g_targetFolder)
     InitializeAllConfigs()
 }
@@ -207,7 +211,7 @@ Run_() {
     Check(ConfigReadPromptEncodingVersion() == beforeVersion,
         "A refused save does not change the encoding marker")
 
-    try DirDelete(g_targetFolder, true)
+    try TestFinishDirectory(g_targetFolder)
     Log("")
     Log(g_failures ? ("RESULT: " . g_failures . " FAILURE(S)") : "RESULT: prompt encoding holds")
     if (g_failures)

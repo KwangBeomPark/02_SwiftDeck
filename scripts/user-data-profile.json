@@ -1,0 +1,12 @@
+{
+  "appId": "App02_SwiftDeck",
+  "displayName": "SwiftDeck",
+  "installFolder": "SwiftDeck",
+  "executableNames": [
+    "SwiftDeck.exe"
+  ],
+  "optionalDataFolders": [],
+  "externalData": [
+    "Legacy Roaming settings/backups preserved after migration"
+  ]
+}

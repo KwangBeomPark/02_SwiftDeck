@@ -32,12 +32,12 @@
 
 ## 🚀 다운로드 및 설치 방법 (원클릭 인스톨러)
 
-**SwiftDeck**은 UAC 관리자 권한 승인 없이 일반 사내 PC에서도 즉시 설치할 수 있는 **표준 사용자 설치 프로그램(`SwiftDeck-Setup.vX.Y.Z.exe`)**으로 단일 배포됩니다.
+**SwiftDeck**은 UAC 관리자 권한 승인 없이 일반 사내 PC에서도 즉시 설치할 수 있는 **표준 사용자 설치 프로그램(`App02_SwiftDeck_Setup_vX.Y.Z.exe`)**으로 단일 배포됩니다.
 
 ### 📥 원클릭 설치 가이드
 
 1. GitHub 화면 우측의 **[Releases](https://github.com/KwangBeomPark/02_SwiftDeck/releases)** 탭으로 이동합니다.
-2. 최신 릴리즈의 설치 파일 **`SwiftDeck-Setup.vX.Y.Z.exe`** (사내 배포 시 `App02_SwiftDeck-Setup_vX.Y.Z.exe`)를 다운로드합니다.
+2. 최신 릴리즈의 설치 파일 **`App02_SwiftDeck_Setup_vX.Y.Z.exe`**를 다운로드합니다.
 3. 내려받은 설치 파일을 실행하면 관리자 권한 팝업 없이 `%LOCALAPPDATA%\Programs\SwiftDeck`에 즉시 자동 설치됩니다.
 4. 구버전 바로가기와 잔여 설정은 자동으로 정리되며, 사용자 설정(`UserSetting\config.ini`)은 업데이트 및 삭제 시에도 안전하게 보존됩니다.
 5. 설치 완료 후 시작 메뉴, 바탕화면 바로가기 또는 시스템 트레이 아이콘을 통해 즉시 사용할 수 있습니다.
@@ -71,17 +71,17 @@
 
 ### 🔍 내려받은 파일 확인
 
-서명만으로도 실행 파일이 변조되지 않았음은 확인됩니다. 다만 `.zip`에는 서명이 없고, 인증서 창을 여는 것보다 해시 비교가 빠릅니다. 릴리즈마다 파일별 해시를 담은 `SHA256SUMS.txt`를 함께 올립니다.
+서명과 SHA-256은 별도 검사입니다. 새 릴리즈에는 설치 파일 한 개와 SHA256SUMS.txt·build-manifest.json을 함께 게시합니다:
 
 ```powershell
-Get-FileHash .\SwiftDeck-Setup.v1.4.1.exe -Algorithm SHA256
+Get-FileHash .\App02_SwiftDeck_Setup_v1.4.2.exe -Algorithm SHA256
 ```
 
 출력된 해시가 `SHA256SUMS.txt`의 해당 파일 줄과 같아야 합니다. 다르면 파일을 지우고 다시 내려받으세요.
 
 ### 🔄 자동 업데이트
 
-SwiftDeck은 시작 후 하루에 최대 한 번 GitHub의 최신 정식 릴리스를 확인합니다. 새 릴리스가 있으면 **App Settings** 헤더에 `New version vX available`을 표시하고 헤더의 **Update to vX** 버튼에서 바로 검증된 업데이트를 시작할 수 있습니다. **App Information**과 트레이 메뉴의 **Check for Updates**에서는 수동으로 다시 확인할 수 있습니다. 업데이트는 현재 실행 파일과 같은 폴더에 릴리스 실행 파일을 내려받고 `SwiftDeck.update.ini`의 SHA-256을 확인한 뒤 안전하게 교체하고 재실행합니다. 버전이 표기된 자산을 우선 사용하고 없으면 `SwiftDeck.exe`로 대체합니다. 실행 중인 파일의 이름은 그대로 유지되므로, 이름을 바꿔 쓰던 실행 파일은 업데이트 후에도 그 이름을 유지합니다. `%AppData%\SwiftDeck`의 저장 설정은 교체하지 않습니다. 소스 실행 모드와 읽기 전용 폴더에서는 수동 업데이트만 제공합니다.
+SwiftDeck 1.4.2부터 build-manifest.json의 제품·버전·설치 파일명·크기·SHA-256을 검사하고, 유효한 타임스탬프 서명과 현재 앱과 같은 게시자 인증서를 확인한 뒤 설치 프로그램을 실행합니다. UserSetting은 설치 설계에서 보존합니다. 1.3.1·1.4.0·1.4.1은 이 설치 파일 단일 배포로 처음 한 번 수동 업그레이드해야 합니다. 소스 실행·읽기 전용 경로·인증서 교체·서명 검사 차단 시 수동 설치합니다. 새 파일명은 1.4.2 게시 후 적용하며 기존 게시본은 원래 이름을 유지합니다.
 
 ### 🛠️ 파워 유저 및 개발자용 커스텀 빌드
 
@@ -96,7 +96,7 @@ SwiftDeck은 시작 후 하루에 최대 한 번 GitHub의 최신 정식 릴리�
 .\scripts\build.ps1 -CertificateThumbprint <thumbprint>
 ```
 
-서명은 `SwiftDeck.update.ini`에 SHA-256이 기록되기 **전에** 수행되므로, 서명된 빌드도
+서명은 `build-manifest.json`에 SHA-256이 기록되기 **전에** 수행되므로, 서명된 빌드도
 업데이터가 그대로 검증할 수 있습니다. 인증서를 넘기지 않으면 서명 없이 빌드됩니다.
 
 릴리스 전에는 이전 버전에서 올라오는 자동 업데이트 경로를 확인하세요.
@@ -114,7 +114,7 @@ tests/    테스트 모음. scripts/build.ps1이 tests/*Tests.ahk를 모두 실�
 scripts/  빌드, 패키징, 서명, 선택적 릴리즈 배포
 assets/   공개 이미지, 아이콘, README 미디어
 dist/     로컬 빌드 산출물(.exe만), Git 제외
-release/  업로드용 자산: 버전 표기 .exe와 .zip, SwiftDeck.exe, SwiftDeck.update.ini, SHA256SUMS.txt, Git 제외
+release/  서명한 App02 설치 파일 한 개, SHA256SUMS.txt와 build-manifest.json; Git 제외
 ```
 
 배포용 바이너리는 저장소 본문에 커밋하지 않고 GitHub Releases에 업로드합니다.
@@ -161,7 +161,7 @@ release/  업로드용 자산: 버전 표기 .exe와 .zip, SwiftDeck.exe, SwiftD
 
 ## ⚙️ 설정 파일 및 팀 배포 방식
 
-SwiftDeck 설정값은 모두 로컬 `.ini` 파일에 저장됩니다. 레지스트리를 사용하지 않습니다.
+활성 설정은 실행 진입점 옆 `UserSetting`의 `.ini` 파일에 저장합니다. 기존 레지스트리의 누락된 값은 한 번 복사하며 원본은 보존합니다.
 
 설정 파일 위치는 아래 메뉴에서 열 수 있습니다.
 
@@ -224,3 +224,13 @@ SwiftDeck 설정값은 모두 로컬 `.ini` 파일에 저장됩니다. 레지스
       alt="Buy Me A Coffee">
   </a>
 </p>
+
+
+공통 설치·설정·배포 정비의 기준과 현재 예외는 [6개 앱 공통 정비 기준](docs/SUITE_STANDARDIZATION.md)을 참고하세요.
+[배포·업그레이드 2단계 검수](docs/STANDARDIZATION_PHASE2_REVIEW.md)에 서명·스테이징·별칭 동일성·기존 배포물 보존 및 남은 실제 Windows 검증을 기록했습니다. 로컬 빌드는 `dist/` 또는 `build/`, 공식 반영은 검증된 서명 절차를 사용합니다.
+
+활성 설정은 실행 파일 또는 소스 진입점 옆 UserSetting의 config.ini(일반 단축키)와 기존 네 기능별 INI에 저장합니다. 이전 Roaming 원본은 검증 복사 후에도 보존하며 새 저장값이 우선합니다. Backup Saved에는 다섯 INI가 포함되고, 구버전 네 파일 백업의 일반 단축키도 Restore에서 복구합니다.
+
+설정 위치·전체 백업·새 폴더 복원: [사용자 자료](docs/USER_DATA.md), [관리 도구](scripts/Manage-UserData.ps1). 공개 구조·대표 흐름: [CODE_MAP](docs/CODE_MAP.md).
+
+[릴리즈 준비 체크리스트](RELEASE_CHECKLIST.md): 검토한 clean main에서 서명 세트를 준비하고, 승인 커밋을 별도로 push한 뒤 게시합니다. 기존 worker 테스트는 별도 보존한 구형 EXE fixture를 필요로 하며 설치 업데이트 검수를 대신하지 않습니다.

@@ -1,4 +1,5 @@
-#Requires AutoHotkey v2.0
+﻿#Requires AutoHotkey v2.0
+#Include _FixtureIsolation.ahk
 #Warn All, Off
 ; Shared harness for the *Tests.ahk scripts.
 ;

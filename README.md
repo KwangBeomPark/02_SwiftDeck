@@ -32,12 +32,12 @@ It is designed especially for finance, sales administration, accounting, credit 
 
 ## 🚀 Download & Installation (One-Click Installer)
 
-**SwiftDeck** is distributed as a **standard per-user Windows installer (`SwiftDeck-Setup.vX.Y.Z.exe`)**, which requires NO administrator privileges (UAC elevation) and installs cleanly on corporate PCs.
+**SwiftDeck** is distributed as a **standard per-user Windows installer (`App02_SwiftDeck_Setup_vX.Y.Z.exe`)**, which requires NO administrator privileges (UAC elevation) and installs cleanly on corporate PCs.
 
 ### 📥 One-Click Installation Guide
 
 1. Go to the **[Releases](https://github.com/KwangBeomPark/02_SwiftDeck/releases)** tab on GitHub.
-2. Download the latest installer **`SwiftDeck-Setup.vX.Y.Z.exe`** (or `App02_SwiftDeck-Setup_vX.Y.Z.exe` for enterprise distribution).
+2. Download the latest installer **`App02_SwiftDeck_Setup_vX.Y.Z.exe`**.
 3. Run the installer. It will automatically install to `%LOCALAPPDATA%\Programs\SwiftDeck` without requiring UAC approval.
 4. Legacy shortcuts and Run registry keys will be cleanly removed, while your custom settings (`UserSetting\config.ini`) are strictly preserved across updates and uninstallation.
 5. Launch SwiftDeck from the Start Menu, Desktop shortcut, or system tray.
@@ -71,17 +71,17 @@ Either way, do not turn Smart App Control off to work around a block: it is a **
 
 ### 🔍 Verifying Your Download
 
-The signature already tells you the executable is unaltered, but the `.zip` is not signed and a digest is quicker to compare than a certificate dialog. Every release ships a `SHA256SUMS.txt` asset listing a digest for each file:
+The installer signature and SHA-256 digest are separate checks. Each new release includes `SHA256SUMS.txt` and `build-manifest.json`:
 
 ```powershell
-Get-FileHash .\SwiftDeck-Setup.v1.4.1.exe -Algorithm SHA256
+Get-FileHash .\App02_SwiftDeck_Setup_v1.4.2.exe -Algorithm SHA256
 ```
 
 The printed hash must match the line for that filename in `SHA256SUMS.txt`. If it does not, delete the file and download it again.
 
 ### 🔄 Automatic Updates
 
-SwiftDeck checks the latest public GitHub Release after startup at most once every 24 hours. When a newer release is available, **App Settings** shows `New version vX available` in its header and the header's **Update to vX** button starts the verified update directly. **App Information** and the tray menu's **Check for Updates** remain available for manual checks. The updater downloads the release binary beside the currently running app, verifies its SHA-256 digest against `SwiftDeck.update.ini`, safely replaces the executable, and restarts SwiftDeck. It prefers the version-stamped asset and falls back to `SwiftDeck.exe`. The running file keeps its own name, so an executable you renamed stays renamed after an update. Saved settings in `%AppData%\SwiftDeck` are not replaced. Source mode and read-only folders remain manual-update only.
+SwiftDeck v1.4.2 and later use the installer metadata in `build-manifest.json`, validate the product/version/name/size/SHA-256, and launch the installer only after trusted timestamped signatures and matching publisher certificates are verified. Settings in UserSetting remain protected by the installer. Versions 1.3.1, 1.4.0 and 1.4.1 need a first manual upgrade to this installer-only release. Source mode, read-only locations, certificate rotation, or blocked signature verification require manual installation. Existing releases retain their original file names; the new name takes effect only when v1.4.2 is published.
 
 ### 🛠️ For Power Users & Developers (Custom Build)
 
@@ -97,7 +97,7 @@ certificate store and pass its thumbprint:
 .\scripts\build.ps1 -CertificateThumbprint <thumbprint>
 ```
 
-Signing runs before the SHA-256 is written into `SwiftDeck.update.ini`, so a signed
+Signing runs before the SHA-256 is written into `build-manifest.json`, so a signed
 build stays verifiable by the updater. Without the parameter the build is unsigned.
 
 Before publishing, exercise the self-update path against the previous release:
@@ -115,7 +115,7 @@ tests/    Test suites; scripts/build.ps1 runs every tests/*Tests.ahk and fails t
 scripts/  Build, packaging, signing, and optional release publishing
 assets/   Public images, icons, and README media
 dist/     Local build output (.exe only), excluded from Git
-release/  Assets for upload: versioned .exe and .zip, SwiftDeck.exe, SwiftDeck.update.ini, SHA256SUMS.txt; excluded from Git
+release/  One signed App02 installer, SHA256SUMS.txt and build-manifest.json; excluded from Git
 ```
 
 Release binaries should be uploaded to GitHub Releases, not committed to the repository body.
@@ -162,7 +162,7 @@ Release binaries should be uploaded to GitHub Releases, not committed to the rep
 
 ## ⚙️ Settings File & Team Deployment
 
-SwiftDeck stores all configuration data in local `.ini` files — no registry entries, no hidden data.
+SwiftDeck stores active settings in `UserSetting` beside the executable or source entry point: `config.ini` for general shortcuts and four feature INI files. Existing Roaming settings are copied once with verification; destination settings win and originals remain. Legacy registry values are copied only when missing.
 
 You can open the settings folder from:
 
@@ -173,8 +173,8 @@ System Tray Menu → Open Settings Folder
 The same actions are available in **App Settings → General → Data, Startup & Recovery**:
 
 - **Open Folder** opens the local settings directory.
-- **Backup Saved** backs up the configuration currently stored on disk. If General shows pending changes, apply them first.
-- **Restore** confirms before replacing the current configuration and then reloads SwiftDeck.
+- **Backup Saved** backs up the five configuration INI files currently stored on disk. If General shows pending changes, apply them first.
+- **Restore** confirms before replacing the current configuration and then reloads SwiftDeck. Older four-file backups also restore their general shortcuts into config.ini.
 - **Factory Reset** preserves backups but replaces active settings with defaults after confirmation.
 
 **If Restore is not enough.** SwiftDeck refreshes `Backups\<file>.bak` every time it starts, so if a problem is only noticed after a restart, that copy already reflects the problem. Before overwriting it, the previous `.bak` is kept as `Backups\<file>.bak.YYYYMMDD`, one per day and five days in total. **Restore** only uses the plain `.bak`; to go further back, open the settings folder, copy the dated file you want over the matching `.ini` with SwiftDeck closed, and start it again.
@@ -225,3 +225,11 @@ If this tool has reduced your month-end closing hours or eased repetitive work, 
       alt="Buy Me A Coffee">
   </a>
 </p>
+
+
+Shared installation, settings, release goals, and current exceptions are documented in [Suite standardization](docs/SUITE_STANDARDIZATION.md).
+The [release and upgrade review](docs/STANDARDIZATION_PHASE2_REVIEW.md) describes staging, signing before packaging, identical installer aliases, and the remaining Windows checks. Local builds use `dist/` or `build/`; only the verified signing pipeline promotes an official release.
+
+설정 위치·전체 백업·새 폴더 복원: [사용자 자료](docs/USER_DATA.md), [관리 도구](scripts/Manage-UserData.ps1). 공개 구조·대표 흐름: [CODE_MAP](docs/CODE_MAP.md).
+
+[Release preparation checklist](RELEASE_CHECKLIST.md): prepare the signed set from a reviewed clean main; push that commit separately before publish. Legacy worker tests require separately retained old EXE fixtures and do not validate installer updates.

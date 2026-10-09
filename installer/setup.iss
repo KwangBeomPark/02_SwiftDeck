@@ -2,7 +2,7 @@
 ; Standard Per-User installer for PL Suite applications (App01 ~ App10).
 
 #ifndef MyAppVersion
-#define MyAppVersion "1.4.1"
+#define MyAppVersion "1.4.2"
 #endif
 
 #ifndef MyAppExeSource
@@ -26,8 +26,8 @@ DefaultDirName={localappdata}\Programs\SwiftDeck
 DefaultGroupName=SwiftDeck
 DisableProgramGroupPage=yes
 PrivilegesRequired=lowest
-OutputDir=..\release
-OutputBaseFilename=SwiftDeck-Setup.v{#MyAppVersion}
+OutputDir=..\build\installer
+OutputBaseFilename=App02_SwiftDeck_Setup_v{#MyAppVersion}
 SetupIconFile=..\assets\SwiftDeck.ico
 UninstallDisplayIcon={app}\{#MyAppExeName}
 Compression=lzma2/ultra64
@@ -35,6 +35,10 @@ SolidCompression=yes
 WizardStyle=modern
 CloseApplications=yes
 CloseApplicationsFilter=SwiftDeck.exe
+RestartApplications=no
+UsePreviousAppDir=yes
+VersionInfoVersion={#MyAppVersion}
+VersionInfoProductVersion={#MyAppVersion}
 
 [Languages]
 Name: "korean"; MessagesFile: "compiler:Languages\Korean.isl"
@@ -46,7 +50,7 @@ Name: "startupicon"; Description: "Windows 시작 시 자동 실행 (Run at Wind
 
 [Files]
 ; Main application executable
-Source: "{#MyAppExeSource}"; DestDir: "{app}"; DestName: "{#MyAppExeName}"; Flags: ignoreversion
+Source: "{#MyAppExeSource}"; DestDir: "{app}"; DestName: "{#MyAppExeName}"; Flags: ignoreversion; BeforeInstall: EnsureUpgradeReady
 
 [Dirs]
 ; UserSetting directory preservation (never deleted on uninstall)
@@ -79,3 +83,22 @@ Name: "{userstartup}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: st
 
 [Run]
 Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent
+
+[Code]
+procedure EnsureUpgradeReady;
+var
+  ExistingExe: String;
+  Probe: TFileStream;
+begin
+  { Restart Manager gets its normal-close opportunity before this callback. }
+  ExistingExe := ExpandConstant('{app}\{#MyAppExeName}');
+  if FileExists(ExistingExe) then
+  begin
+    try
+      Probe := TFileStream.Create(ExistingExe, fmOpenReadWrite or fmShareExclusive);
+      Probe.Free;
+    except
+      RaiseException('SwiftDeck is still in use or the executable cannot be replaced. Close SwiftDeck and retry. The existing executable and user settings have been preserved.');
+    end;
+  end;
+end;

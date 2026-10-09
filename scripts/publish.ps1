@@ -1,121 +1,74 @@
-# scripts/publish.ps1 - Automated GitHub Release publishing pipeline for SwiftDeck.
-# Run this script to publish official release artifacts to GitHub Releases.
-
-[CmdletBinding(SupportsShouldProcess, ConfirmImpact = "High")]
+# Publication is explicit and consumes a completed signed set. It never builds.
+[CmdletBinding(SupportsShouldProcess)]
 param(
-    [string]$OutputDirectory = "release",
+    [string]$OutputDirectory = 'release',
     [switch]$AllowUnsigned,
     [switch]$NoPush,
-    [switch]$Draft
+    [switch]$Draft,
+    [switch]$Resume
 )
-
-$ErrorActionPreference = "Stop"
+$ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
-. (Join-Path $PSScriptRoot "Common.ps1")
-
+. (Join-Path $PSScriptRoot 'Common.ps1')
+. (Join-Path $PSScriptRoot 'ReleaseSafety.ps1')
+if ($AllowUnsigned) { throw 'Unsigned official publication is prohibited.' }
 $repoRoot = Split-Path -Parent $PSScriptRoot
-$sourcePath = Join-Path $repoRoot "src\SwiftDeck.ahk"
-$version = Get-AppVersion $sourcePath
+$version = Get-AppVersion (Join-Path $repoRoot 'src\SwiftDeck.ahk')
 $tag = "v$version"
-
-foreach ($tool in @("git", "gh")) {
-    if (-not (Get-Command $tool -ErrorAction SilentlyContinue)) {
-        throw "$tool is required to publish."
-    }
-}
-
-$notesPath = $null
 Push-Location -LiteralPath $repoRoot
 try {
-    $branchQuery = Invoke-Native git @("branch", "--show-current")
-    $branch = if ($branchQuery.StdOut.Count -gt 0) { $branchQuery.StdOut[0] } else { "" }
-    if ($branchQuery.ExitCode -ne 0 -or $branch -ne "main") {
-        throw "Publishing is allowed only from main; current branch is '$branch'."
-    }
-    $treeDirty = Test-GitWorkingTreeDirty $repoRoot
-    if ($null -eq $treeDirty) {
-        throw "Could not read the working-tree status."
-    }
-    if ($treeDirty) {
-        throw "Commit or remove working-tree changes before publishing. publish.ps1 never commits automatically."
-    }
-    $targetCommit = Get-GitHeadCommit $repoRoot
-    if (-not $targetCommit) {
-        throw "Could not resolve HEAD."
-    }
-
-    $null = Invoke-NativeChecked gh @("auth", "status") "GitHub CLI authentication" -Quiet -FailureHint "Run 'gh auth login'."
-
-    # Check for existing releases
-    $releaseQuery = Invoke-NativeChecked gh @("release", "list", "--limit", "1000", "--json", "tagName,isDraft") "GitHub release query" -Quiet
-    $releases = @()
-    $releaseJson = $releaseQuery.StdOut -join "`n"
-    if ($releaseJson) {
-        $releases = @(ConvertFrom-Json $releaseJson | ForEach-Object { $_ })
-    }
-    $existingRelease = @($releases | Where-Object { $_.tagName -eq $tag })
-    if ($existingRelease.Count -gt 0) {
-        if ($existingRelease[0].isDraft) {
-            throw "A draft release $tag already exists (probably a failed earlier publish). Review it, then run 'gh release delete $tag --yes' and retry."
-        }
-        throw "GitHub release $tag already exists. Bump g_appVersion instead of replacing it."
-    }
-
-    # Verify remote tag
-    $tagQuery = Invoke-NativeChecked git @("ls-remote", "--tags", "origin", "refs/tags/$tag", "refs/tags/$tag^{}") "Remote tag query" -Quiet
-    $remoteTagCommit = $null
-    foreach ($line in $tagQuery.StdOut) {
-        if ($line -match "^([0-9a-f]{40})\s+refs/tags/$([regex]::Escape($tag))(\^\{\})?$") {
-            if ($null -eq $remoteTagCommit -or $Matches[2]) {
-                $remoteTagCommit = $Matches[1]
-            }
-        }
-    }
-    if ($null -ne $remoteTagCommit -and $remoteTagCommit -ne $targetCommit) {
-        throw "Tag $tag already exists on origin at $remoteTagCommit, not at HEAD ($targetCommit). Move or delete the tag before publishing."
-    }
-
+    $branchQuery = Invoke-Git $repoRoot @('branch', '--show-current') -Checked
+    if ($branchQuery.StdOut.Count -ne 1 -or $branchQuery.StdOut[0] -ne 'main') { throw 'Publication requires main.' }
+    if ((Test-GitWorkingTreeDirty $repoRoot) -ne $false) { throw 'Commit the reviewed source before building and publishing. This script never commits.' }
+    $commit = Get-GitHeadCommit $repoRoot
+    if (-not $commit) { throw 'Cannot resolve HEAD.' }
     $outputRoot = Resolve-RepoPath $repoRoot $OutputDirectory
-    $setupExe = Join-Path $outputRoot "SwiftDeck-Setup.v$version.exe"
-    $enterpriseSetup = Join-Path $outputRoot "App02_SwiftDeck-Setup_v$version.exe"
-    $versionedExe = Join-Path $outputRoot "SwiftDeck.v$version.exe"
-    $versionedZip = Join-Path $outputRoot "SwiftDeck.v$version.zip"
-    $checksumsPath = Join-Path $outputRoot "SHA256SUMS.txt"
-    $manifestPath = Join-Path $outputRoot "build-manifest.json"
-
-    if (-not (Test-Path -LiteralPath $setupExe) -or -not (Test-Path -LiteralPath $versionedExe)) {
-        Write-Host "Running build.ps1 to produce release artifacts..." -ForegroundColor Cyan
-        & (Join-Path $PSScriptRoot "build.ps1") -OutputDirectory $OutputDirectory
+    if ($outputRoot -ne (Join-Path $repoRoot 'release')) { throw 'Publication requires the official repository release directory.' }
+    $repository = 'KwangBeomPark/02_SwiftDeck'
+    $ghRepository = "github.com/$repository"
+    Assert-SuiteOrigin $repoRoot $repository
+    $remoteMain = Invoke-Git $repoRoot @('ls-remote', 'origin', 'refs/heads/main') -Checked
+    if ($remoteMain.StdOut.Count -ne 1 -or $remoteMain.StdOut[0] -notmatch "^$commit\s+refs/heads/main$") { throw 'Push the reviewed source commit to origin/main before publication. This script never pushes.' }
+    $null = Assert-SuiteRelease $outputRoot $version $commit (Get-SuiteSourceDigest $repoRoot) -RequireClean
+    $uploadPaths = @(@(Get-SuiteArtifactNames $version) + @('SHA256SUMS.txt', 'build-manifest.json') | ForEach-Object { Join-Path $outputRoot $_ })
+    $null = Invoke-NativeChecked gh @('auth', 'status', '--hostname', 'github.com') 'GitHub authentication' -Quiet
+    $publicationRequested = $false
+    $tagQuery = Invoke-Git $repoRoot @('ls-remote', '--tags', 'origin', "refs/tags/$tag", "refs/tags/$tag^{}") -Checked
+    $remoteCommit = $null
+    foreach ($line in $tagQuery.StdOut) {
+        if ($line -match '^([0-9a-f]{40})\s+(.+)$') {
+            if (-not $remoteCommit -or $Matches[2].EndsWith('^{}')) { $remoteCommit = $Matches[1] }
+        }
+    }
+    if ($remoteCommit -and $remoteCommit -ne $commit) { throw 'Existing tag points to another commit. Tags are never moved or deleted.' }
+    $remote = Get-SuiteRemoteRelease $repository $tag
+    if ($remote) {
+        if (-not $Resume) { throw 'Release already exists. Use a new version, or -Resume only for missing identical assets.' }
+        if ($remoteCommit -ne $commit -and -not (-not $remoteCommit -and $remote.draft -and $remote.target_commitish -ceq $commit)) { throw 'Resume requires the verified commit on the existing tag or unpublished draft target.' }
+        if ($remote.tag_name -ne $tag) { throw 'Unexpected remote release identity.' }
+        $missing = @(Get-SuiteMissingAssets $uploadPaths $remote.assets)
+        if ($missing.Count -eq 0) { Write-Host 'All assets already match; nothing to upload.'; return }
+        if ($PSCmdlet.ShouldProcess($tag, 'Upload only verified missing release assets')) {
+            $null = Invoke-NativeChecked gh (@('release', 'upload', $tag, '--repo', $ghRepository) + $missing) 'Missing asset upload'
+            $publicationRequested = $true
+        }
     } else {
-        Write-Host "Using existing verified release artifacts in $outputRoot..." -ForegroundColor Cyan
-    }
-
-    if (-not $AllowUnsigned) {
-        $sig = Get-AuthenticodeSignature -LiteralPath $setupExe
-        if ($sig.Status -ne "Valid") {
-            throw "Artifact $setupExe is not digitally signed (Status: $($sig.Status)). Run release.ps1 first, or pass -AllowUnsigned for testing."
-        }
-        Write-Host "Verified Authenticode signature: $($sig.SignerCertificate.Subject)" -ForegroundColor Green
-    }
-
-    $uploadFiles = @($setupExe, $enterpriseSetup, $versionedExe, $versionedZip, $checksumsPath, $manifestPath)
-
-    foreach ($f in $uploadFiles) {
-        if (-not (Test-Path -LiteralPath $f)) {
-            throw "Release artifact missing: $f"
+        # Only a successful complete list can establish absence.
+        if ($Resume) { throw 'Cannot resume a release that does not exist.' }
+        if ($PSCmdlet.ShouldProcess($tag, 'Create release from the verified commit and signed set')) {
+            $arguments = @('release', 'create', $tag) + $uploadPaths + @('--repo', $ghRepository, '--target', $commit, '--title', "SwiftDeck v$version", '--generate-notes', '--draft')
+            $null = Invoke-NativeChecked gh $arguments 'Release creation'
+            $publicationRequested = $true
         }
     }
-
-    $releaseTitle = "SwiftDeck v$version"
-    $createArgs = @("release", "create", $tag) + $uploadFiles + @("--target", $targetCommit, "--title", $releaseTitle, "--generate-notes")
-    if ($Draft) {
-        $createArgs += "--draft"
+    if ($publicationRequested) {
+        $verifiedRemote = Get-SuiteRemoteRelease $repository $tag
+        if (-not $verifiedRemote -or $verifiedRemote.tag_name -ne $tag -or @(Get-SuiteMissingAssets $uploadPaths $verifiedRemote.assets).Count -ne 0) { throw 'Published asset set is incomplete. Existing remote files are preserved; resume only this verified set.' }
+        Write-Host 'Remote asset digests and sizes match the verified local set.'
+        if (-not $remote -and -not $Draft) {
+            $null = Invoke-NativeChecked gh @('release', 'edit', $tag, '--draft=false', '--repo', $ghRepository) 'Publishing verified draft'
+            $published = Get-SuiteRemoteRelease $repository $tag
+            if (-not $published -or $published.draft -ne $false -or @(Get-SuiteMissingAssets $uploadPaths $published.assets).Count -ne 0) { throw 'Public release state or assets could not be verified. Preserve the existing release.' }
+        }
     }
-
-    Write-Host "`nCreating GitHub Release $tag..." -ForegroundColor Cyan
-    Invoke-NativeChecked gh $createArgs "Create GitHub Release"
-
-    Write-Host "`n[SUCCESS] GitHub Release $tag published successfully!" -ForegroundColor Green
-} finally {
-    Pop-Location
-}
+} finally { Pop-Location }

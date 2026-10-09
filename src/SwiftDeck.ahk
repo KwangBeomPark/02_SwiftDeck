@@ -1,7 +1,7 @@
 #Requires AutoHotkey v2.0
 #SingleInstance Force
 ;@Ahk2Exe-SetName SwiftDeck
-;@Ahk2Exe-SetVersion 1.4.1.0
+;@Ahk2Exe-SetVersion 1.4.2.0
 ;@Ahk2Exe-SetDescription SwiftDeck - FinOps Automation & HotKey Suite
 ;@Ahk2Exe-SetMainIcon ..\assets\SwiftDeck.ico
 
@@ -10,13 +10,10 @@
 ; =============================================================================
 
 ; [Global] Display version shown in the app UI
-global g_appVersion := "1.4.1"
+global g_appVersion := "1.4.2"
 
-; [Global] Path configuration (migrate legacy folder name)
-if (DirExist(A_AppData . "\AHK_FolderHotKey") && !DirExist(A_AppData . "\SwiftDeck")) {
-    try DirMove(A_AppData . "\AHK_FolderHotKey", A_AppData . "\SwiftDeck", 1)
-}
-global g_targetFolder := A_AppData . "\SwiftDeck\"
+; [Global] All active settings live beside the executable; Roaming originals stay untouched.
+global g_targetFolder := A_ScriptDir . "\UserSetting\"
 
 ; [Global] Config file names
 global g_fileName_Folder := "App02_01FavFolderSetting_v2_DoNotDelete.ini"
@@ -127,7 +124,15 @@ OnStartup() {
     warnings := []
 
     ; Standard PL Suite configuration migration and shortcut cleanup
-    EnsureSettingsMigration()
+    ; Never initialize defaults over a failed legacy copy.
+    try {
+        ConfigMigrateLegacySettings([A_AppData . "\SwiftDeck\", A_AppData . "\AHK_FolderHotKey\"])
+        ConfigMigrateLegacyAppSettings()
+        EnsureSettingsMigration()
+    } catch Error as err {
+        MsgBox("Settings migration could not be completed. Your existing files were preserved.`nClose SwiftDeck, check that UserSetting is writable, and retry.`n`n" err.Message, "SwiftDeck settings", 262160)
+        ExitApp()
+    }
     CleanLegacyShortcuts()
 
     isFirstRun := false

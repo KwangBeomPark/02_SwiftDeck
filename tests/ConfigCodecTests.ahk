@@ -1,4 +1,4 @@
-#Requires AutoHotkey v2.0
+﻿#Requires AutoHotkey v2.0
 #Warn All, Off
 ; Round-trips every settings codec through real files in a temp folder.
 ;
@@ -11,7 +11,7 @@
 global g_out := A_Temp . "\swiftdeck-codec-tests.txt"
 global g_failures := 0
 
-global g_targetFolder := A_Temp . "\swiftdeck-codec-tests\"
+global g_targetFolder := A_Temp . "\swiftdeck-codec-tests-" . DllCall("GetCurrentProcessId") . "-" . A_TickCount . "\"
 global g_fileName_Folder := "App02_01FavFolderSetting_v2_DoNotDelete.ini"
 global g_fileName_Hotkey := "App02_02HotkeySetting_v2_DoNotDelete.ini"
 global g_fileName_Hotstring := "App02_03HotstringSetting_DoNotDelete.ini"
@@ -28,6 +28,10 @@ OnError(Report)
 SetTimer(Run_, -200)
 
 #Include ..\src\lib\Config.ahk
+#Include _FixtureIsolation.ahk
+global CONFIG_DIR := RTrim(g_targetFolder, "\")
+global CONFIG_FILE := g_targetFolder . "config.ini"
+global REG_PATH := "HKCU\Software\SwiftDeck-Tests-NoUserSettings\" . DllCall("GetCurrentProcessId")
 #Include ..\src\lib\Migration.ahk
 
 Log(line) {
@@ -63,7 +67,7 @@ Visible(text) {
 
 Fresh() {
     if DirExist(g_targetFolder)
-        DirDelete(g_targetFolder, true)
+        TestFinishDirectory(g_targetFolder)
     DirCreate(g_targetFolder)
     InitializeAllConfigs()
 }
@@ -335,7 +339,7 @@ Run_() {
     Check(HotstringDecodeIniValue("%2522") == "%22", "Legacy: escaped percent still decodes to a literal %22")
     Check(HotstringDecodeIniValue(HotstringEncodeIniValue("%22")) == "%22", "Round-trip: user-typed %22 stays literal")
 
-    try DirDelete(g_targetFolder, true)
+    try TestFinishDirectory(g_targetFolder)
     Log("")
     Log(g_failures ? ("RESULT: " . g_failures . " FAILURE(S)") : "RESULT: all codecs round-trip")
     if (g_failures)

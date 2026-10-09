@@ -1,5 +1,6 @@
 #Requires AutoHotkey v2.0
 #Include Utils.ahk
+#Include ReleaseJson.ahk
 
 ; =================================================================================
 ; Module: UpdateManager
@@ -124,7 +125,52 @@ class UpdateManager {
             AssetName: assetName,
             CanonicalAssetName: canonicalAssetName,
             Sha256: StrUpper(hashMatch[1]),
-            Size: size
+            Size: size,
+            IsInstaller: false
+        }
+    }
+
+    static ParseBuildManifestJson(manifestText, version) {
+        version := this.NormalizeReleaseTag(version)
+        document := ReleaseJson.Parse(manifestText)
+        if !(document is Map) || !document.Has("application") || !(Type(document["application"]) == "String")
+            || document["application"] !== "SwiftDeck" || !document.Has("version")
+            || !(Type(document["version"]) == "String") || document["version"] !== version
+            || !document.Has("artifacts") || !(document["artifacts"] is Array)
+            throw Error("Unexpected application, version or artifacts in build-manifest.json.")
+
+        approvedNames := ["App02_SwiftDeck_Setup_v" version ".exe", "App02_SwiftDeck-Setup_v" version ".exe"]
+        selected := 0
+        seen := Map()
+        seen.CaseSense := "On"
+        for entry in document["artifacts"] {
+            if !(entry is Map) || !entry.Has("name") || !(Type(entry["name"]) == "String")
+                throw Error("Invalid artifact in build-manifest.json.")
+            name := entry["name"]
+            if seen.Has(name)
+                throw Error("Duplicate artifact in build-manifest.json.")
+            seen[name] := true
+            if (name !== approvedNames[1] && name !== approvedNames[2])
+                continue
+            if IsObject(selected)
+                throw Error("Ambiguous installers in build-manifest.json.")
+            selected := entry
+        }
+        if !IsObject(selected) || !selected.Has("bytes") || Type(selected["bytes"]) != "Integer"
+            || !selected.Has("sha256") || Type(selected["sha256"]) != "String"
+            || !RegExMatch(selected["sha256"], '^[0-9a-fA-F]{64}$')
+            throw Error("Installer has invalid size or SHA-256 in build-manifest.json.")
+        size := selected["bytes"]
+        if (size < 100000 || size > 100000000)
+            throw Error("Installer size is outside allowed range.")
+
+        return {
+            Version: version,
+            AssetName: selected["name"],
+            CanonicalAssetName: selected["name"],
+            Sha256: StrUpper(selected["sha256"]),
+            Size: size,
+            IsInstaller: true
         }
     }
 
@@ -360,13 +406,19 @@ class UpdateManager {
         try {
             progress.Status.Value := "Reading the signed release manifest…"
             progress.Bar.Value := 15
-            manifestUrl := this.GetAssetDownloadUrl(state.LatestVersion, this.ManifestAssetName)
-            manifest := this.ParseUpdateManifest(this.HttpGetText(manifestUrl, "text/plain"))
+            manifest := 0
+            try {
+                jsonUrl := this.GetAssetDownloadUrl(state.LatestVersion, "build-manifest.json")
+                manifest := this.ParseBuildManifestJson(this.HttpGetText(jsonUrl, "application/json"), state.LatestVersion)
+            } catch {
+                manifestUrl := this.GetAssetDownloadUrl(state.LatestVersion, this.ManifestAssetName)
+                manifest := this.ParseUpdateManifest(this.HttpGetText(manifestUrl, "text/plain"))
+            }
             if (manifest.Version != state.LatestVersion)
                 throw Error("Release tag and update manifest version do not match.")
 
             token := FormatTime(, "yyyyMMddHHmmss") . "-" . A_TickCount
-            pendingPath := targetPath . ".update-" . token . ".tmp"
+            pendingPath := targetPath . ".update-" . token . (manifest.IsInstaller ? ".exe" : ".tmp")
             backupPath := targetPath . ".previous-" . token . ".bak"
             helperPath := targetPath . ".updater-" . token . ".exe"
             markerPath := targetPath . ".update-" . token . ".ok"
@@ -382,6 +434,27 @@ class UpdateManager {
             actualHash := this.ComputeFileSha256(pendingPath)
             if (actualHash != manifest.Sha256)
                 throw Error("Downloaded file SHA-256 does not match the release manifest.")
+
+            if (manifest.IsInstaller) {
+                handle := DllCall("CreateFileW", "Str", pendingPath, "UInt", 0x80000000,
+                    "UInt", 1, "Ptr", 0, "UInt", 3, "UInt", 0x80, "Ptr", 0, "Ptr")
+                if (handle == -1)
+                    throw OSError(A_LastError, "Installer is locked; use a manually reviewed installer.")
+                try {
+                    ; Deny writers and replacement between final integrity verification and launch.
+                    if (this.ComputeFileSha256(pendingPath) != manifest.Sha256)
+                        throw Error("Installer changed before publisher verification.")
+                    progress.Status.Value := "Verifying installer publisher…"
+                    this.VerifyInstallerPublisher(pendingPath)
+                    progress.Status.Value := "Update verified. Launching installer…"
+                    progress.Bar.Value := 100
+                    Run(pendingPath)
+                } finally {
+                    DllCall("CloseHandle", "Ptr", handle)
+                }
+                Sleep(400)
+                ExitApp()
+            }
 
             FileCopy(targetPath, helperPath, true)
             progress.Status.Value := "Update verified. Restarting SwiftDeck…"
@@ -413,9 +486,31 @@ class UpdateManager {
         progressGui.SetFont("s10", "Segoe UI")
         statusText := progressGui.Add("Text", "x20 y20 w360 h24", "Preparing update…")
         progressBar := progressGui.Add("Progress", "x20 y55 w360 h20 Range0-100", 5)
-        progressGui.Add("Text", "x20 y85 w360 h35", "Your saved settings stay in %AppData%\SwiftDeck and will not be replaced.")
+        progressGui.Add("Text", "x20 y85 w360 h35", "Your saved settings in UserSetting will be preserved.")
         ShowCenteredOnMouse(progressGui, "w400 h135")
         return { Gui: progressGui, Status: statusText, Bar: progressBar }
+    }
+
+    static VerifyInstallerPublisher(installerPath) {
+        if !A_IsCompiled
+            throw Error("Automatic installer verification requires the signed compiled app.")
+        helperPath := A_Temp . "\SwiftDeck-signature-" . DllCall("GetCurrentProcessId")
+            . "-" . A_TickCount . "-" . Random(100000, 999999) . ".ps1"
+        ownsHelper := false
+        try {
+            ; The literal source path embeds the verifier in the compiled app.
+            FileInstall("..\scripts\Verify-UpdateInstaller.ps1", helperPath, false)
+            ownsHelper := true
+            powershellPath := A_WinDir . "\System32\WindowsPowerShell\v1.0\powershell.exe"
+            command := this.QuoteArgument(powershellPath) . " -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "
+                . this.QuoteArgument(helperPath) . " -InstallerPath " . this.QuoteArgument(installerPath)
+                . " -CurrentExecutable " . this.QuoteArgument(A_ScriptFullPath)
+            if (RunWait(command, , "Hide") != 0)
+                throw Error("Installer signature or publisher verification failed. SwiftDeck was not changed. Use a manually reviewed installer if the publisher certificate has changed.")
+        } finally {
+            if ownsHelper && FileExist(helperPath)
+                try FileDelete(helperPath)
+        }
     }
 
     static IsFolderWritable(folderPath) {

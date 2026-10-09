@@ -1,4 +1,4 @@
-#Requires AutoHotkey v2.0
+﻿#Requires AutoHotkey v2.0
 #Include Utils.ahk
 #Include ..\SettingsManager.ahk
 ; NOTE: Global variables (g_targetFolder, g_filePath_*) are declared in SwiftDeck.ahk.
@@ -9,6 +9,7 @@
 ConfigGetManagedFiles() {
     global g_fileName_Folder, g_fileName_Hotkey, g_fileName_Hotstring, g_fileName_KeyRemap
     global g_filePath_Folder, g_filePath_Hotkey, g_filePath_Hotstring, g_filePath_KeyRemap
+    global CONFIG_FILE
 
     return [
         {
@@ -42,6 +43,14 @@ ConfigGetManagedFiles() {
             Path: g_filePath_KeyRemap,
             ResetTarget: "Key Remaps",
             RequiredBackup: false
+        },
+        {
+            CanonicalName: "LocalSettings",
+            Aliases: ["LocalSettings"],
+            FileName: "config.ini",
+            Path: CONFIG_FILE,
+            ResetTarget: "General",
+            RequiredBackup: false
         }
     ]
 }
@@ -67,6 +76,8 @@ ConfigGetDefaultText(canonicalName) {
             return GetDefaultHotstringData()
         case "KeyRemaps":
             return GetDefaultKeyRemapData()
+        case "LocalSettings":
+            return "[Shortcuts]`nMainHotkey=F1`nPromptModifier=#`nPromptUseNumpad=1`nEmojiHotkey=^#Space`nExitHotkey=^#Escape`n[General]`n"
         default:
             throw Error("Unknown default config: " . canonicalName)
     }
@@ -90,6 +101,69 @@ ConfigGetManagedFile(configName) {
 
 ConfigIsFirstRun() {
     return !FileExist(GetConfigPath("Folders"))
+}
+
+ConfigFilesHaveSameBytes(firstPath, secondPath) {
+    first := FileRead(firstPath, "RAW")
+    second := FileRead(secondPath, "RAW")
+    return first.Size == second.Size && (first.Size == 0 || DllCall("ntdll\RtlCompareMemory", "ptr", first.Ptr, "ptr", second.Ptr, "uptr", first.Size, "uptr") == first.Size)
+}
+
+ConfigMigrateLegacySettings(legacyRoots) {
+    global g_targetFolder
+    marker := g_targetFolder ".legacy-files-migrated"
+    if InStr(FileExist(marker), "D")
+        throw Error("A directory occupies the migration marker.")
+    if FileExist(marker)
+        return false
+    ConfigEnsureDir(g_targetFolder)
+    for fileDef in ConfigGetManagedFiles() {
+        if fileDef.CanonicalName == "LocalSettings"
+            continue
+        if FileExist(fileDef.Path) {
+            if InStr(FileExist(fileDef.Path), "D")
+                throw Error("A directory occupies a settings file: " fileDef.FileName)
+            continue
+        }
+        for legacyRoot in legacyRoots {
+            source := RTrim(legacyRoot, "\") "\" fileDef.FileName
+            if !FileExist(source)
+                continue
+            temp := SettingsTempPath(fileDef.Path)
+            try {
+                FileCopy(source, temp, false)
+                if !ConfigFilesHaveSameBytes(source, temp)
+                    throw Error("Legacy settings copy failed validation: " fileDef.FileName)
+                if IniRead(temp) == ""
+                    throw Error("Legacy settings are not a readable INI file: " fileDef.FileName)
+                if !DllCall("MoveFileExW", "str", temp, "str", fileDef.Path, "uint", 8) {
+                    if !FileExist(fileDef.Path)
+                        throw OSError()
+                }
+            } finally {
+                if FileExist(temp)
+                    try FileDelete(temp)
+            }
+            break
+        }
+    }
+    SettingsWriteText(marker, "Legacy copies verified; original Roaming files retained.`n", "UTF-8")
+    return true
+}
+
+ConfigMigrateLegacyAppSettings(overwrite := false) {
+    global CONFIG_FILE
+    changes := []
+    missing := Chr(0x1F)
+    for key in ["MainHotkey", "PromptModifier", "PromptUseNumpad", "EmojiHotkey", "ExitHotkey"] {
+        if !overwrite && IniRead(CONFIG_FILE, "Shortcuts", key, missing) != missing
+            continue
+        value := ConfigReadValue("Settings", "Settings", key, missing)
+        if value != missing
+            changes.Push({Section: "Shortcuts", Key: key, Value: value})
+    }
+    if changes.Length
+        SettingsWriteIniValues(CONFIG_FILE, changes)
 }
 
 InitializeAllConfigs() {
@@ -174,9 +248,11 @@ BackupConfigs(showMsg := false) {
         }
         if (showMsg)
             MsgBox("✅ Settings have been backed up successfully.", "Backup Complete", 262208)
-    } catch {
+    } catch Error as err {
         if (showMsg)
-            MsgBox("❌ An error occurred during backup.", "Error", 262160)
+            MsgBox("❌ Settings backup failed. Your saved files are unchanged.`n`n" err.Message, "Backup Failed", 262160)
+        else
+            throw err
     }
 }
 
@@ -267,23 +343,31 @@ RestoreConfigs() {
     try {
         ConfigEnsureDir(rollbackDir)
         for fileDef in managedFiles {
-            currentPaths.Push(fileDef.Path)
+            hadOriginal := FileExist(fileDef.Path) != ""
             ConfigBackupCurrentFileForRollback(rollbackDir, fileDef.Path)
+            currentPaths.Push({Path: fileDef.Path, HadOriginal: hadOriginal})
         }
 
         for fileDef in managedFiles {
             backupPath := ConfigGetBackupPath(backupDir, fileDef.Path)
             if (fileDef.RequiredBackup || FileExist(backupPath))
-                FileCopy(backupPath, fileDef.Path, true)
+                ConfigCopyFileSafely(backupPath, fileDef.Path)
         }
+
+        ; Older UI backups stored shortcuts in the folder INI, not config.ini.
+        if !FileExist(backupDir "config.ini.bak")
+            ConfigMigrateLegacyAppSettings(true)
 
         ConfigDeleteDirQuietly(rollbackDir)
         MsgBox("✅ Restoration complete. The app will now reload to apply changes.", "Restore Complete", 262208)
         Reload()
     } catch Error as err {
-        ConfigRestoreFilesFromRollback(rollbackDir, currentPaths)
-        ConfigDeleteDirQuietly(rollbackDir)
-        MsgBox("❌ Restore failed and current settings were rolled back.`n`nError: " . err.Message, "Restore Error", 262160)
+        if ConfigRestoreFilesFromRollback(rollbackDir, currentPaths) {
+            ConfigDeleteDirQuietly(rollbackDir)
+            MsgBox("❌ Restore failed and current settings were rolled back.`n`nError: " . err.Message, "Restore Error", 262160)
+        } else {
+            MsgBox("❌ Restore failed and automatic recovery could not finish.`nClose the app before recovering your previous files from:`n" rollbackDir "`n`nError: " err.Message, "Recovery Required", 262160)
+        }
     }
 }
 
@@ -308,46 +392,17 @@ ConfigMakeTempPath(targetPath, tag := "tmp") {
 }
 
 ConfigWriteTextFileSafely(targetPath, content, encoding := "UTF-16") {
-    SplitPath(targetPath, , &dirPath)
-    ConfigEnsureDir(dirPath)
-
-    tempPath := ConfigMakeTempPath(targetPath, "tmp")
-    rollbackPath := ""
-    maxRetries := 3
-    lastErr := ""
-
-    loop maxRetries {
+    loop 3 {
         try {
-            ; Write to a temp file first so a failed write does not destroy the current config.
-            if FileExist(tempPath)
-                FileDelete(tempPath)
-            FileAppend(content, tempPath, encoding)
-            ; Snapshot the target once and reuse it. Minting a fresh copy on each
-            ; retry overwrote this variable, so only the last one was ever
-            ; cleaned up — measured: two orphaned .rollback files left in the
-            ; settings folder for every save that a sync client or scanner
-            ; blocked, accumulating with no upper bound.
-            if (rollbackPath == "" && FileExist(targetPath))
-                rollbackPath := ConfigCreateRollbackCopy(targetPath)
-            FileMove(tempPath, targetPath, true)
-            ; Success — clean up and return
-            ConfigDeleteFileQuietly(rollbackPath)
-            ConfigDeleteFileQuietly(tempPath)
+            SettingsWriteText(targetPath, content, encoding)
             return
         } catch Error as err {
-            lastErr := err
-            if (A_Index < maxRetries)
-                Sleep(100 * A_Index)  ; Exponential backoff: 100ms, 200ms, 300ms
+            if A_Index == 3
+                throw err
+            Sleep(100 * A_Index)
         }
     }
-
-    ; All retries exhausted — restore rollback and propagate error
-    ConfigRestoreRollbackCopy(targetPath, rollbackPath)
-    ConfigDeleteFileQuietly(tempPath)
-    ConfigDeleteFileQuietly(rollbackPath)
-    throw lastErr
 }
-
 ConfigCreateRollbackCopy(targetPath) {
     if !FileExist(targetPath)
         return ""
@@ -381,15 +436,45 @@ ConfigListMissingFiles(paths) {
 }
 
 ConfigBackupCurrentFileForRollback(rollbackDir, sourcePath) {
-    if FileExist(sourcePath)
-        FileCopy(sourcePath, ConfigGetBackupPath(rollbackDir, sourcePath), true)
+    if FileExist(sourcePath) {
+        rollbackPath := ConfigGetBackupPath(rollbackDir, sourcePath)
+        FileCopy(sourcePath, rollbackPath, false)
+        if !ConfigFilesHaveSameBytes(sourcePath, rollbackPath)
+            throw Error("Cannot verify recovery copy: " sourcePath)
+    }
 }
 
 ConfigRestoreFilesFromRollback(rollbackDir, sourcePaths) {
-    for sourcePath in sourcePaths {
+    restored := true
+    for snapshot in sourcePaths {
+        sourcePath := snapshot.Path
         rollbackPath := ConfigGetBackupPath(rollbackDir, sourcePath)
-        if FileExist(rollbackPath)
-            try FileCopy(rollbackPath, sourcePath, true)
+        try {
+            if snapshot.HadOriginal {
+                if !FileExist(rollbackPath)
+                    throw Error("Recovery copy is missing: " sourcePath)
+                if !FileExist(sourcePath) || !ConfigFilesHaveSameBytes(rollbackPath, sourcePath)
+                    ConfigCopyFileSafely(rollbackPath, sourcePath)
+            } else if FileExist(sourcePath) {
+                FileDelete(sourcePath)
+            }
+        } catch {
+            restored := false
+        }
+    }
+    return restored
+}
+
+ConfigCopyFileSafely(sourcePath, targetPath) {
+    temp := SettingsTempPath(targetPath)
+    try {
+        FileCopy(sourcePath, temp, false)
+        if !ConfigFilesHaveSameBytes(sourcePath, temp)
+            throw Error("Cannot verify settings copy: " targetPath)
+        SettingsCommitTemp(temp, targetPath)
+    } finally {
+        if FileExist(temp)
+            try FileDelete(temp)
     }
 }
 
@@ -439,16 +524,7 @@ ConfigReadValue(configName, section, key, defaultValue := "") {
 }
 
 ConfigWriteValue(configName, section, key, value) {
-    configPath := GetConfigPath(configName)
-    rollbackPath := ConfigCreateRollbackCopy(configPath)
-    try {
-        IniWrite(value, configPath, section, key)
-    } catch Error as err {
-        ConfigRestoreRollbackCopy(configPath, rollbackPath)
-        throw err
-    } finally {
-        ConfigDeleteFileQuietly(rollbackPath)
-    }
+    SettingsWriteIniValues(GetConfigPath(configName), [{Section: section, Key: key, Value: value}])
 }
 
 ConfigReadSection(configName, section, defaultValue := "") {
@@ -460,35 +536,12 @@ ConfigReadSection(configName, section, defaultValue := "") {
 }
 
 ConfigWriteSection(configName, section, content) {
-    configPath := GetConfigPath(configName)
-    rollbackPath := ConfigCreateRollbackCopy(configPath)
-    try {
-        if (content != "") {
-            IniWrite(content, configPath, section)
-        } else {
-            IniDelete(configPath, section)
-        }
-    } catch Error as err {
-        ConfigRestoreRollbackCopy(configPath, rollbackPath)
-        throw err
-    } finally {
-        ConfigDeleteFileQuietly(rollbackPath)
-    }
+    SettingsWriteIniValues(GetConfigPath(configName), [{Section: section, SectionText: content}])
 }
 
 ConfigDeleteSection(configName, section) {
-    configPath := GetConfigPath(configName)
-    rollbackPath := ConfigCreateRollbackCopy(configPath)
-    try {
-        IniDelete(configPath, section)
-    } catch Error as err {
-        ConfigRestoreRollbackCopy(configPath, rollbackPath)
-        throw err
-    } finally {
-        ConfigDeleteFileQuietly(rollbackPath)
-    }
+    SettingsWriteIniValues(GetConfigPath(configName), [{Section: section, SectionText: ""}])
 }
-
 ConfigReadSections(configName) {
     try {
         return IniRead(GetConfigPath(configName))
@@ -522,83 +575,47 @@ ConfigGetFallbackAppSettings() {
     }
 }
 
+ConfigReadShortcut(key, defaultValue) {
+    value := ""
+    if TryReadLocalSetting(key, &value)
+        return value
+    return ConfigReadValue("Settings", "Settings", key, defaultValue)
+}
+
 ConfigReadAppSettings() {
     defaults := ConfigGetFallbackAppSettings()
-
-    mainHk := ""
-    if !TryReadLocalSetting("MainHotkey", &mainHk) || mainHk == ""
-        mainHk := ConfigReadValue("Settings", "Settings", "MainHotkey", defaults.MainHotkey)
-
-    promptMod := ""
-    if !TryReadLocalSetting("PromptModifier", &promptMod) || promptMod == ""
-        promptMod := ConfigReadValue("Settings", "Settings", "PromptModifier", defaults.PromptModifier)
-
-    promptNum := defaults.PromptUseNumpad
-    rawNum := ""
-    if TryReadLocalSetting("PromptUseNumpad", &rawNum) && rawNum != "" {
-        try promptNum := Integer(rawNum)
-        catch
-            promptNum := defaults.PromptUseNumpad
-    } else {
-        promptNum := ConfigReadNumber("Settings", "Settings", "PromptUseNumpad", defaults.PromptUseNumpad)
-    }
-
-    emojiHk := ""
-    if !TryReadLocalSetting("EmojiHotkey", &emojiHk) || emojiHk == ""
-        emojiHk := ConfigReadValue("Settings", "Settings", "EmojiHotkey", defaults.EmojiHotkey)
-
-    exitHk := ""
-    if !TryReadLocalSetting("ExitHotkey", &exitHk) || exitHk == ""
-        exitHk := ConfigReadValue("Settings", "Settings", "ExitHotkey", defaults.ExitHotkey)
-
+    mainHk := ConfigReadShortcut("MainHotkey", defaults.MainHotkey)
+    promptMod := ConfigReadShortcut("PromptModifier", defaults.PromptModifier)
+    rawNum := ConfigReadShortcut("PromptUseNumpad", defaults.PromptUseNumpad)
+    try promptNum := Integer(rawNum)
+    catch
+        promptNum := defaults.PromptUseNumpad
+    emojiHk := ConfigReadShortcut("EmojiHotkey", defaults.EmojiHotkey)
+    exitHk := ConfigReadShortcut("ExitHotkey", defaults.ExitHotkey)
     return {
-        MainHotkey: mainHk,
+        MainHotkey: mainHk == "" ? defaults.MainHotkey : mainHk,
         PromptModifier: promptMod,
         PromptUseNumpad: promptNum,
-        EmojiHotkey: emojiHk,
-        ExitHotkey: exitHk
+        EmojiHotkey: emojiHk == "" ? defaults.EmojiHotkey : emojiHk,
+        ExitHotkey: exitHk == "" ? defaults.ExitHotkey : exitHk
     }
 }
 
-; Emoji and Exit are optional so an older call site that only knows the first
-; three values leaves the stored shortcuts untouched.
-;
-; These values are validated as a set — a main hotkey is only accepted after
-; being checked against the exit hotkey, and so on — so a failure part-way
-; through must not leave half of that set stored. A rollback copy taken up front
-; and restored on any failure gives that, while still writing key by key.
-;
-; Rewriting the whole [Settings] section in one call would also be atomic, but
-; IniRead's section mode does not return comment or blank lines, so the rewrite
-; would quietly delete them; per-key writes leave the rest of the file alone.
+; Commit the validated shortcut set together. Older three-argument callers leave
+; the Emoji and Exit shortcuts unchanged. The legacy folder INI stays untouched.
 ConfigWriteAppSettings(mainHotkey, promptModifier, promptUseNumpad, emojiHotkey := "", exitHotkey := "") {
-    configPath := GetConfigPath("Settings")
-    rollbackPath := ConfigCreateRollbackCopy(configPath)
-    try {
-        ConfigWriteValue("Settings", "Settings", "MainHotkey", mainHotkey)
-        ConfigWriteValue("Settings", "Settings", "PromptModifier", promptModifier)
-        ConfigWriteValue("Settings", "Settings", "PromptUseNumpad", promptUseNumpad)
-        if (emojiHotkey != "")
-            ConfigWriteValue("Settings", "Settings", "EmojiHotkey", emojiHotkey)
-        if (exitHotkey != "")
-            ConfigWriteValue("Settings", "Settings", "ExitHotkey", exitHotkey)
-
-        ; Also synchronize to standardized UserSetting\config.ini
-        SafeWriteLocalSetting(mainHotkey, "MainHotkey")
-        SafeWriteLocalSetting(promptModifier, "PromptModifier")
-        SafeWriteLocalSetting(promptUseNumpad, "PromptUseNumpad")
-        if (emojiHotkey != "")
-            SafeWriteLocalSetting(emojiHotkey, "EmojiHotkey")
-        if (exitHotkey != "")
-            SafeWriteLocalSetting(exitHotkey, "ExitHotkey")
-    } catch Error as err {
-        ConfigRestoreRollbackCopy(configPath, rollbackPath)
-        throw err
-    } finally {
-        ConfigDeleteFileQuietly(rollbackPath)
-    }
+    global CONFIG_FILE
+    changes := [
+        {Section: "Shortcuts", Key: "MainHotkey", Value: mainHotkey},
+        {Section: "Shortcuts", Key: "PromptModifier", Value: promptModifier},
+        {Section: "Shortcuts", Key: "PromptUseNumpad", Value: promptUseNumpad}
+    ]
+    if emojiHotkey != ""
+        changes.Push({Section: "Shortcuts", Key: "EmojiHotkey", Value: emojiHotkey})
+    if exitHotkey != ""
+        changes.Push({Section: "Shortcuts", Key: "ExitHotkey", Value: exitHotkey})
+    SettingsWriteIniValues(CONFIG_FILE, changes)
 }
-
 ConfigReadFolderItems() {
     items := []
     content := ConfigReadSection("Folders", "FolderMenu", "")

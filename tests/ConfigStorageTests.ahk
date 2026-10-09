@@ -1,4 +1,4 @@
-#Requires AutoHotkey v2.0
+﻿#Requires AutoHotkey v2.0
 #Warn All, Off
 ; Backup retention, and the measured Windows INI ceilings the size guards assume.
 ;
@@ -13,7 +13,7 @@
 global g_out := A_Temp . "\swiftdeck-storage-tests.txt"
 global g_failures := 0
 
-global g_targetFolder := A_Temp . "\swiftdeck-storage-tests\"
+global g_targetFolder := A_Temp . "\swiftdeck-storage-tests-" . DllCall("GetCurrentProcessId") . "-" . A_TickCount . "\"
 global g_fileName_Folder := "App02_01FavFolderSetting_v2_DoNotDelete.ini"
 global g_fileName_Hotkey := "App02_02HotkeySetting_v2_DoNotDelete.ini"
 global g_fileName_Hotstring := "App02_03HotstringSetting_DoNotDelete.ini"
@@ -30,6 +30,10 @@ OnError(Report)
 SetTimer(Run_, -200)
 
 #Include ..\src\lib\Config.ahk
+#Include _FixtureIsolation.ahk
+global CONFIG_DIR := RTrim(g_targetFolder, "\")
+global CONFIG_FILE := g_targetFolder . "config.ini"
+global REG_PATH := "HKCU\Software\SwiftDeck-Tests-NoUserSettings\" . DllCall("GetCurrentProcessId")
 
 Log(line) {
     FileAppend(line . "`n", g_out, "UTF-8")
@@ -78,7 +82,7 @@ Run_() {
     if FileExist(g_out)
         FileDelete(g_out)
     if DirExist(g_targetFolder)
-        DirDelete(g_targetFolder, true)
+        TestFinishDirectory(g_targetFolder)
     DirCreate(g_targetFolder)
 
     ; ---------- Backup retention ----------
@@ -168,7 +172,7 @@ Run_() {
     Check(StrLen(sectionBack) >= StrLen(body) - 50, "A section at the slot limit round-trips intact")
     Check(sectionLimit > valueLimit, "The section limit leaves room for more than one prompt")
 
-    try DirDelete(g_targetFolder, true)
+    try TestFinishDirectory(g_targetFolder)
     Log("")
     Log(g_failures ? ("RESULT: " . g_failures . " FAILURE(S)") : "RESULT: storage guards hold")
     if (g_failures)

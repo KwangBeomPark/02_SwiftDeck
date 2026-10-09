@@ -16,9 +16,10 @@ Set-StrictMode -Version Latest
 $repoRoot = Split-Path -Parent $PSScriptRoot
 
 if ($SkipSigning) {
+    if ($Publish) { throw 'Unsigned builds cannot be published.' }
     Write-Host "Running unsigned build..." -ForegroundColor Cyan
     $buildScript = Join-Path $PSScriptRoot "build.ps1"
-    & $buildScript -OutputDirectory "release"
+    & $buildScript -OutputDirectory "dist"
 } else {
     $signScript = Join-Path $PSScriptRoot "sign.ps1"
     $signArgs = @{

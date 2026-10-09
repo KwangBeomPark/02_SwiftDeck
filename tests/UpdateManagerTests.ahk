@@ -1,4 +1,4 @@
-#Requires AutoHotkey v2.0
+﻿#Requires AutoHotkey v2.0
 #Include _TestHarness.ahk
 #Include ..\src\lib\UpdateManager.ahk
 
@@ -90,7 +90,60 @@ try {
     AssertEqual(FileExist(backupPath), "", "Consume restored backup")
 } finally {
     if DirExist(rollbackDir)
-        DirDelete(rollbackDir, true)
+        TestFinishDirectory(rollbackDir)
 }
 
-TestsPassed("UpdateManager")
+; Exercise the same signed artifact shape produced by ReleaseSafety.ps1.
+releaseHash := "BA7816BF8F01CFEA414140DE5DAE2223B00361A396177A9CB410FF61F20015AD"
+manifestFixture := '{"application":"SwiftDeck","version":"9.8.7","signed":true,"artifacts":['
+    . '{"name":"App02_SwiftDeck_Setup_v9.8.7.exe","bytes":123456,"sha256":"' releaseHash '",'
+    . '"signature":{"status":"Valid","signerThumbprint":"fixture","timestampThumbprint":"fixture"}}]}'
+parsed := UpdateManager.ParseBuildManifestJson(manifestFixture, "9.8.7")
+AssertEqual(parsed.AssetName, "App02_SwiftDeck_Setup_v9.8.7.exe", "Read nested signature without losing installer fields")
+AssertEqual(parsed.Sha256, releaseHash, "Read installer hash from its own artifact")
+AssertTrue(parsed.IsInstaller, "Installer metadata returns installer update mode")
+historicalJson := StrReplace(manifestFixture, "SwiftDeck_Setup", "SwiftDeck-Setup")
+AssertEqual(UpdateManager.ParseBuildManifestJson(historicalJson, "9.8.7").AssetName,
+    "App02_SwiftDeck-Setup_v9.8.7.exe", "Read historical App02 installer names")
+AssertThrows(() => UpdateManager.ParseBuildManifestJson(StrReplace(manifestFixture, '"application":"SwiftDeck"', '"application":"AnotherApp"'), "9.8.7"), "Reject another product")
+AssertThrows(() => UpdateManager.ParseBuildManifestJson(manifestFixture, "9.8.8"), "Reject wrong manifest version")
+AssertThrows(() => UpdateManager.ParseBuildManifestJson(StrReplace(manifestFixture, '"bytes":123456', '"bytes":"123456"'), "9.8.7"), "Reject string size")
+AssertThrows(() => UpdateManager.ParseBuildManifestJson(StrReplace(manifestFixture, '"bytes":123456', '"bytes":123456.0'), "9.8.7"), "Reject floating size")
+AssertThrows(() => UpdateManager.ParseBuildManifestJson(StrReplace(manifestFixture, '"bytes":123456', '"bytes":true'), "9.8.7"), "Reject boolean size")
+AssertThrows(() => UpdateManager.ParseBuildManifestJson(StrReplace(manifestFixture, '"bytes":123456', '"bytes":99999'), "9.8.7"), "Reject undersized installer")
+AssertThrows(() => UpdateManager.ParseBuildManifestJson(StrReplace(manifestFixture, '"bytes":123456', '"bytes":100000001'), "9.8.7"), "Reject oversized installer")
+AssertThrows(() => UpdateManager.ParseBuildManifestJson(StrReplace(manifestFixture, releaseHash, "invalid"), "9.8.7"), "Reject invalid hash")
+AssertThrows(() => UpdateManager.ParseBuildManifestJson(StrReplace(manifestFixture, '"name":"App02', '"name":"../App02'), "9.8.7"), "Reject path traversal asset")
+AssertThrows(() => UpdateManager.ParseBuildManifestJson(StrReplace(manifestFixture, '"bytes":123456', '"bytes":123456,"bytes":123456'), "9.8.7"), "Reject duplicate metadata keys")
+AssertThrows(() => UpdateManager.ParseBuildManifestJson(manifestFixture . "extra", "9.8.7"), "Reject trailing JSON data")
+AssertThrows(() => UpdateManager.ParseBuildManifestJson(SubStr(manifestFixture, 1, -1), "9.8.7"), "Reject truncated JSON")
+AssertThrows(() => UpdateManager.ParseBuildManifestJson(StrReplace(manifestFixture, '"bytes":123456', '"bytes":0123456'), "9.8.7"), "Reject leading zero number")
+AssertThrows(() => UpdateManager.ParseBuildManifestJson(StrReplace(manifestFixture, '"bytes":123456', '"bytes":+123456'), "9.8.7"), "Reject plus number")
+AssertThrows(() => UpdateManager.ParseBuildManifestJson(StrReplace(manifestFixture, '"version":"9.8.7"', '"version":"9.8.7","version":"9.8.7"'), "9.8.7"), "Reject repeated version")
+duplicateJson := '{"application":"SwiftDeck","version":"9.8.7","artifacts":['
+    . '{"name":"App02_SwiftDeck_Setup_v9.8.7.exe","bytes":123456,"sha256":"' releaseHash '"},'
+    . '{"name":"App02_SwiftDeck_Setup_v9.8.7.exe","bytes":123456,"sha256":"' releaseHash '"}]}'
+AssertThrows(() => UpdateManager.ParseBuildManifestJson(duplicateJson, "9.8.7"), "Reject duplicate installer artifacts")
+AssertThrows(() => UpdateManager.ParseBuildManifestJson(StrReplace(duplicateJson, '"name":"App02_SwiftDeck_Setup', '"name":"App02_SwiftDeck-Setup', , 1), "9.8.7"), "Reject ambiguous historical/new installers")
+foreignHashJson := '{"application":"SwiftDeck","version":"9.8.7","artifacts":['
+    . '{"name":"App02_SwiftDeck_Setup_v9.8.7.exe","bytes":123456},'
+    . '{"name":"other.exe","bytes":123456,"sha256":"' releaseHash '"}]}'
+AssertThrows(() => UpdateManager.ParseBuildManifestJson(foreignHashJson, "9.8.7"), "Never borrow another artifact hash")
+AssertThrows(() => UpdateManager.ParseBuildManifestJson(StrReplace(manifestFixture, '"artifacts":[', '"artifacts":{'), "9.8.7"), "Reject non-array artifacts")
+AssertEqual(ReleaseJson.Parse('{"x":1,"X":2}').Count, 2, "JSON keys are case sensitive")
+AssertEqual(ReleaseJson.Parse('{"note":"braces { } and quote \" remain data"}')["note"],
+    'braces { } and quote " remain data', "Strings cannot split artifact objects")
+AssertEqual(ReleaseJson.Parse('{"name":"\u0041\uD83D\uDE00"}')["name"], "A" . Chr(0x1F600), "Decode Unicode pair")
+AssertThrows(() => ReleaseJson.Parse('{"name":"\uD800"}'), "Reject orphan surrogate")
+AssertThrows(() => ReleaseJson.Parse('{"name":"\N"}'), "Reject nonstandard escape")
+AssertThrows(() => ReleaseJson.Parse('{"name":"\u0000"}'), "Reject unsupported NUL")
+deepJson := "0"
+loop 34
+    deepJson := "[" . deepJson . "]"
+AssertThrows(() => ReleaseJson.Parse(deepJson), "Reject excess nesting")
+hugeJson := ""
+loop 1049
+    hugeJson .= Format("{:01000}", 0)
+AssertThrows(() => ReleaseJson.Parse(hugeJson), "Bound manifest length")
+
+TestsPassed("UpdateManager (signed manifest + JSON safety regressions)")

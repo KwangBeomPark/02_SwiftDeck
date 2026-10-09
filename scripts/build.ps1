@@ -16,7 +16,8 @@ param(
 
     [string]$TimestampUrl = "http://time.certum.pl",
 
-    [switch]$Publish
+    [switch]$Publish,
+    [switch]$ExecutableOnly
 )
 
 # SwiftDeck build, packaging, and optional GitHub Release publishing pipeline.
@@ -30,6 +31,22 @@ param(
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 . (Join-Path $PSScriptRoot "Common.ps1")
+. (Join-Path $PSScriptRoot "ReleaseSafety.ps1")
+$buildRepoRoot = Split-Path -Parent $PSScriptRoot
+$buildOutput = Resolve-RepoPath $buildRepoRoot $OutputDirectory
+Assert-SuiteWorkspacePath $buildRepoRoot $buildOutput
+$allowedOutput = $false
+foreach ($folder in @('build', 'dist', 'out')) {
+    $allowedRoot = Join-Path $buildRepoRoot $folder
+    if ($buildOutput -eq $allowedRoot -or $buildOutput.StartsWith(($allowedRoot + '\'), [StringComparison]::OrdinalIgnoreCase)) { $allowedOutput = $true }
+}
+if (-not $allowedOutput) { throw 'Local build output must be inside build, dist or out.' }
+$officialRoot = Join-Path $buildRepoRoot 'release'
+if ($buildOutput -eq $officialRoot -or $buildOutput.StartsWith(($officialRoot + '\'), [StringComparison]::OrdinalIgnoreCase)) {
+    throw 'build.ps1 cannot write official release files. Use sign.ps1; unsigned builds belong in dist/build.'
+}
+if ($Publish) { throw 'Use publish.ps1 explicitly after a signed, verified release. build.ps1 never publishes.' }
+if ($ExecutableOnly -and $CertificateThumbprint) { throw 'Executable-only builds are unsigned input for sign.ps1.' }
 
 # Runs every tests\*Tests.ahk and fails the build if any of them does. Each
 # script exits non-zero on a failed assertion, and a load-time error leaves the
@@ -138,10 +155,8 @@ function Find-SignTool {
     if ($null -ne $onPath) {
         return $onPath.Source
     }
-    $stepwiseSignTool = "C:\Dev\GitHub\06_Stepwise\release\build\signtool\signtool.exe"
-    if (Test-Path -LiteralPath $stepwiseSignTool -PathType Leaf) {
-        return $stepwiseSignTool
-    }
+    $localSignTool = Join-Path (Split-Path -Parent $PSScriptRoot) 'tools\signtool\signtool.exe'
+    if (Test-Path -LiteralPath $localSignTool -PathType Leaf) { return $localSignTool }
     $programFilesX86 = ${env:ProgramFiles(x86)}
     if ([string]::IsNullOrWhiteSpace($programFilesX86)) {
         return $null
@@ -294,7 +309,13 @@ if ($SkipTests) {
     Write-Warning "Test gate skipped (-SkipTests)."
 } else {
     Invoke-TestSuite -TestsDir (Join-Path $repoRoot "tests") -Interpreter $baseAhk
+    $null = Invoke-NativeChecked powershell.exe @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (Join-Path $PSScriptRoot 'static-check.ps1')) 'Static checks'
+    foreach ($test in @('Test-ReleaseSafety.ps1', 'Test-SignToolDiscovery.ps1', 'Test-UpdateInstallerSignature.ps1')) {
+        $null = Invoke-NativeChecked powershell.exe @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (Join-Path $repoRoot "tests\$test")) $test
+    }
+    $null = Invoke-NativeChecked powershell.exe @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (Join-Path $PSScriptRoot 'test_user_data_backup.ps1')) 'User data backup tests'
 }
+$provenance = [ordered]@{ commit = Get-GitHeadCommit $repoRoot; workingTreeDirty = Test-GitWorkingTreeDirty $repoRoot; sourceDigest = Get-SuiteSourceDigest $repoRoot; testsPassed = -not [bool]$SkipTests; testGate = 'AHK regression suites + static checks + release safety/discovery'; testedAtUtc = [DateTime]::UtcNow.ToString('o') }
 
 $targetOutputDir = Resolve-RepoPath $repoRoot $OutputDirectory
 New-Item -ItemType Directory -Path $targetOutputDir -Force | Out-Null
@@ -303,7 +324,7 @@ $versionedName = "SwiftDeck.v$version"
 $localVersionedExe = Join-Path $targetOutputDir "$versionedName.exe"
 $versionedZip = Join-Path $targetOutputDir "$versionedName.zip"
 $setupExe = Join-Path $targetOutputDir "SwiftDeck-Setup.v$version.exe"
-$enterpriseSetup = Join-Path $targetOutputDir "App02_SwiftDeck-Setup_v$version.exe"
+$enterpriseSetup = Join-Path $targetOutputDir "App02_SwiftDeck_Setup_v$version.exe"
 $releaseChecksums = Join-Path $targetOutputDir "SHA256SUMS.txt"
 $manifestPath = Join-Path $targetOutputDir "build-manifest.json"
 
@@ -320,10 +341,14 @@ $compile = Start-Process -FilePath $compilerPath -ArgumentList @(
     "/out", "`"$localVersionedExe`"",
     "/icon", "`"$iconPath`"",
     "/base", "`"$baseAhk`""
-) -Wait -PassThru
+) -Wait -PassThru -WindowStyle Hidden
 if ($compile.ExitCode -ne 0 -or -not (Test-Path -LiteralPath $localVersionedExe)) {
     throw "Ahk2Exe compilation failed with exit code $($compile.ExitCode)."
 }
+if ($provenance.sourceDigest -ne (Get-SuiteSourceDigest $repoRoot) -or $provenance.commit -ne (Get-GitHeadCommit $repoRoot)) { throw 'Sources changed during the build. Rebuild before signing.' }
+$buildRecord = [ordered]@{ version = $version; executableSha256 = (Get-FileHash -LiteralPath $localVersionedExe -Algorithm SHA256).Hash.ToLowerInvariant(); provenance = $provenance }
+[IO.File]::WriteAllText((Join-Path $targetOutputDir 'build-provenance.json'), (($buildRecord | ConvertTo-Json -Depth 5) + "`n"), [Text.UTF8Encoding]::new($false))
+if ($ExecutableOnly) { Write-Host "Executable built for signing: $localVersionedExe"; return }
 
     if ($CertificateThumbprint) {
         Write-Host "Signing $versionedName.exe..."
@@ -332,60 +357,35 @@ if ($compile.ExitCode -ne 0 -or -not (Test-Path -LiteralPath $localVersionedExe)
         Write-Host "  (Executable is unsigned; run release.ps1 to build and sign with Certum/SimplySign)" -ForegroundColor Yellow
     }
 
-    # Create portable zip package
-    if (Test-Path -LiteralPath $versionedZip) { Remove-Item -LiteralPath $versionedZip -Force }
-    Compress-Archive -LiteralPath $localVersionedExe -DestinationPath $versionedZip -Force
-
     Write-Host "[2/4] Building Per-User Windows Installer with Inno Setup..."
     $iscc = Find-InnoSetupCompiler
     if ($null -eq $iscc) {
         throw "Inno Setup compiler (ISCC.exe) was not found. Please install Inno Setup 6."
     }
     $setupIssPath = Join-Path $repoRoot "installer\setup.iss"
-    $isccArgs = @("/DMyAppVersion=$version", "/DMyAppExeSource=$localVersionedExe", "/O$targetOutputDir", "`"$setupIssPath`"")
+    $isccArgs = @("/DMyAppVersion=$version", "/DMyAppExeSource=$localVersionedExe", "/O$targetOutputDir", $setupIssPath)
     Write-Host "  Compiling: $iscc $isccArgs"
-    $compileInstaller = Start-Process -FilePath $iscc -ArgumentList $isccArgs -Wait -PassThru -NoNewWindow
-    if ($compileInstaller.ExitCode -ne 0 -or -not (Test-Path -LiteralPath $setupExe)) {
-        throw "Inno Setup compilation failed with exit code $($compileInstaller.ExitCode)."
-    }
-
-    # Generate enterprise alias installer
-    Copy-Item -LiteralPath $setupExe -Destination $enterpriseSetup -Force
+    $null = Invoke-NativeChecked $iscc $isccArgs 'Inno Setup compilation'
+    if (-not (Test-Path -LiteralPath $enterpriseSetup)) { throw 'Inno Setup did not produce the expected installer.' }
 
     if ($CertificateThumbprint) {
-        Write-Host "Signing installer binaries..."
-        Invoke-ArtifactSigning -Paths @($setupExe, $enterpriseSetup) -Certificate $signingCertificate -Thumbprint $CertificateThumbprint -TimestampUrl $TimestampUrl
+        Write-Host "Signing installer binary..."
+        Invoke-ArtifactSigning -Paths @($enterpriseSetup) -Certificate $signingCertificate -Thumbprint $CertificateThumbprint -TimestampUrl $TimestampUrl
     }
 
 Write-Host "[3/4] Preparing release artifacts..."
 $artifactPaths = [System.Collections.Generic.List[string]]::new()
-$artifactPaths.Add($setupExe)
 $artifactPaths.Add($enterpriseSetup)
-$artifactPaths.Add($localVersionedExe)
-$artifactPaths.Add($versionedZip)
 
-$artifactInfo = foreach ($path in $artifactPaths) {
-    $item = Get-Item -LiteralPath $path
-    $hash = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant()
-    [pscustomobject]@{
-        name   = $item.Name
-        bytes  = $item.Length
-        sha256 = $hash
+# Clean up local binaries from targetOutputDir if they should not be in release
+foreach ($excludedFile in @($localVersionedExe, $versionedZip, $setupExe)) {
+    if (Test-Path -LiteralPath $excludedFile) {
+        Remove-Item -LiteralPath $excludedFile -Force -ErrorAction SilentlyContinue
     }
 }
 
-$utf8NoBom = [Text.UTF8Encoding]::new($false)
-$checksumLines = @($artifactInfo | ForEach-Object { "$($_.sha256)  $($_.name)" })
-[IO.File]::WriteAllText($releaseChecksums, (($checksumLines -join "`n") + "`n"), $utf8NoBom)
-
-$manifest = [ordered]@{
-    application      = "SwiftDeck"
-    version          = $version
-    fileVersion      = "$version.0"
-    builtAtUtc       = [DateTime]::UtcNow.ToString("o")
-    artifacts        = @($artifactInfo)
-}
-[IO.File]::WriteAllText($manifestPath, (($manifest | ConvertTo-Json -Depth 5) + "`n"), $utf8NoBom)
+Write-SuiteReleaseMetadata $targetOutputDir $version $provenance -Signed:([bool]$CertificateThumbprint)
+Remove-Item -LiteralPath (Join-Path $targetOutputDir 'build-provenance.json')
 
 Write-Host "`n[4/4] Build completed successfully: $targetOutputDir" -ForegroundColor Green
 Get-Item -LiteralPath (@($artifactPaths) + @($releaseChecksums, $manifestPath)) |
