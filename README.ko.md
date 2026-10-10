@@ -3,10 +3,6 @@
 # ⚡ SwiftDeck: 단축키 맵핑, 업무 프롬프트 및 리포트 작성 지원 도구
 
 <p align="center">
-  <img src="./assets/demo.gif" width="900" alt="SwiftDeck Demo">
-</p>
-
-<p align="center">
   <img src="./assets/swiftdeck_infographic.svg" width="950" alt="SwiftDeck 아키텍처 및 핵심 성능 파이프라인 인포그래픽">
 </p>
 
@@ -208,19 +204,6 @@ release/  서명한 App02 설치 파일 한 개, SHA256SUMS.txt와 build-manifes
 - **라이선스**: MIT License. SwiftDeck은 오픈소스이며 자유롭게 수정 및 배포할 수 있습니다.
 
 ---
-
-## ☕ 커피 한잔으로 실무 자동화 응원하기
-
-이 도구가 월말 결산 시간을 줄이거나 반복 업무 피로를 낮추는 데 도움이 되었다면, 보내주시는 응원은 더 실용적인 오픈소스 재무 자동화 도구를 개발하는 데 큰 힘이 됩니다.
-
-<p align="center">
-  <a href="https://www.buymeacoffee.com/KBPark_Bob">
-    <img
-      src="./assets/bmc_button.png"
-      width="220"
-      alt="Buy Me A Coffee">
-  </a>
-</p>
 
 
 공통 설치·설정·배포 정비의 기준과 현재 예외는 [6개 앱 공통 정비 기준](docs/SUITE_STANDARDIZATION.md)을 참고하세요.

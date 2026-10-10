@@ -3,10 +3,6 @@
 # ⚡ SwiftDeck: Skróty klawiszowe, automatyzacja promptów i wsparcie raportowania
 
 <p align="center">
-  <img src="./assets/demo.gif" width="900" alt="SwiftDeck Demo">
-</p>
-
-<p align="center">
   <img src="./assets/swiftdeck_infographic.svg" width="950" alt="SwiftDeck - Architektura techniczna i wydajnosc automatyzacji">
 </p>
 

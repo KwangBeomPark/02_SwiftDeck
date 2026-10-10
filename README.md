@@ -3,10 +3,6 @@
 # ⚡ SwiftDeck: Office Shortcut & Prompt Automation Suite
 
 <p align="center">
-  <img src="./assets/demo.gif" width="900" alt="SwiftDeck Demo">
-</p>
-
-<p align="center">
   <img src="./assets/swiftdeck_infographic.svg" width="950" alt="SwiftDeck Technical Architecture and Key Performance Pipeline">
 </p>
 
@@ -209,19 +205,6 @@ By analyzing real operational pain points and bottlenecks, **SwiftDeck** evolved
 - **License**: MIT License. SwiftDeck is open-source and free to modify and distribute.
 
 ---
-
-## ☕ Support Practical Automation with a Coffee
-
-If this tool has reduced your month-end closing hours or eased repetitive work, your support is a great motivation for developing more practical open-source finance automation tools.
-
-<p align="center">
-  <a href="https://www.buymeacoffee.com/KBPark_Bob">
-    <img
-      src="./assets/bmc_button.png"
-      width="220"
-      alt="Buy Me A Coffee">
-  </a>
-</p>
 
 
 Shared installation, settings, release goals, and current exceptions are documented in [Suite standardization](docs/SUITE_STANDARDIZATION.md).
