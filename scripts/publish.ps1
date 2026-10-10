@@ -43,15 +43,18 @@ try {
     if ($remoteCommit -and $remoteCommit -ne $commit) { throw 'Existing tag points to another commit. Tags are never moved or deleted.' }
     $remote = Get-SuiteRemoteRelease $repository $tag
     if ($remote) {
-        if (-not $Resume) { throw 'Release already exists. Use a new version, or -Resume only for missing identical assets.' }
+        if (-not $remote.draft) { throw "Public release $tag already exists. Bump APP_VERSION instead of replacing it." }
+        if (-not $Resume) { throw 'A draft release already exists. Use a new version, or specify -Resume to complete it.' }
         if ($remoteCommit -ne $commit -and -not (-not $remoteCommit -and $remote.draft -and $remote.target_commitish -ceq $commit)) { throw 'Resume requires the verified commit on the existing tag or unpublished draft target.' }
         if ($remote.tag_name -ne $tag) { throw 'Unexpected remote release identity.' }
         $missing = @(Get-SuiteMissingAssets $uploadPaths $remote.assets)
-        if ($missing.Count -eq 0) { Write-Host 'All assets already match; nothing to upload.'; return }
-        if ($PSCmdlet.ShouldProcess($tag, 'Upload only verified missing release assets')) {
+        if ($missing.Count -gt 0) {
+            if (-not $PSCmdlet.ShouldProcess($tag, 'Upload only verified missing release assets')) { return }
             $null = Invoke-NativeChecked gh (@('release', 'upload', $tag, '--repo', $ghRepository) + $missing) 'Missing asset upload'
-            $publicationRequested = $true
+        } else {
+            Write-Host 'All assets already match existing draft.'
         }
+        $publicationRequested = $true
     } else {
         # Only a successful complete list can establish absence.
         if ($Resume) { throw 'Cannot resume a release that does not exist.' }
@@ -63,12 +66,16 @@ try {
     }
     if ($publicationRequested) {
         $verifiedRemote = Get-SuiteRemoteRelease $repository $tag
-        if (-not $verifiedRemote -or $verifiedRemote.tag_name -ne $tag -or @(Get-SuiteMissingAssets $uploadPaths $verifiedRemote.assets).Count -ne 0) { throw 'Published asset set is incomplete. Existing remote files are preserved; resume only this verified set.' }
+        if (-not $verifiedRemote -or $verifiedRemote.tag_name -ne $tag -or $verifiedRemote.draft -ne $true -or $verifiedRemote.prerelease -ne $false -or @($verifiedRemote.assets).Count -ne $uploadPaths.Count -or @(Get-SuiteMissingAssets $uploadPaths $verifiedRemote.assets).Count -ne 0) { throw 'Published asset set is incomplete. Existing remote files are preserved; resume only this verified set.' }
         Write-Host 'Remote asset digests and sizes match the verified local set.'
-        if (-not $remote -and -not $Draft) {
-            $null = Invoke-NativeChecked gh @('release', 'edit', $tag, '--draft=false', '--repo', $ghRepository) 'Publishing verified draft'
+        if (-not $Draft) {
+            if (-not $PSCmdlet.ShouldProcess($tag, 'Publish the verified draft release')) { return }
+            $null = Invoke-NativeChecked gh @('release', 'edit', $tag, '--draft=false', '--latest', '--repo', $ghRepository) 'Publishing verified draft'
             $published = Get-SuiteRemoteRelease $repository $tag
-            if (-not $published -or $published.draft -ne $false -or @(Get-SuiteMissingAssets $uploadPaths $published.assets).Count -ne 0) { throw 'Public release state or assets could not be verified. Preserve the existing release.' }
+            if (-not $published -or $published.tag_name -ne $tag -or $published.draft -ne $false -or $published.prerelease -ne $false -or @($published.assets).Count -ne $uploadPaths.Count -or @(Get-SuiteMissingAssets $uploadPaths $published.assets).Count -ne 0) { throw 'Public release state or assets could not be verified. Preserve the existing release.' }
+            Write-Host "Published and verified: $tag."
+        } else {
+            Write-Host "Draft release $tag is verified and ready at $commit; publish it when appropriate."
         }
     }
 } finally { Pop-Location }

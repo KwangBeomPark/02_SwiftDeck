@@ -1,23 +1,20 @@
-*Read this in other languages: [English](README.md), [한국어](README.ko.md)*
+﻿*Read this in other languages: [English](README.md), [한국어](README.ko.md), [Polski](README.pl.md)*
 
-# ⚡ SwiftDeck: FinOps & Office Workflow Automation Suite
-A portable productivity command center for office professionals and business teams, built with AutoHotkey v2.
+# ⚡ SwiftDeck: Office Shortcut & Prompt Automation Suite
 
 <p align="center">
   <img src="./assets/demo.gif" width="900" alt="SwiftDeck Demo">
 </p>
 
----
+<p align="center">
+  <img src="./assets/swiftdeck_infographic.svg" width="950" alt="SwiftDeck Technical Architecture and Key Performance Pipeline">
+</p>
 
-## What SwiftDeck Does
+> **Key Remapping · Frequent Prompts & SQL Snippets · Reporting Workflow Support**
 
-**SwiftDeck** helps office professionals eliminate repetitive work by combining folder shortcuts, text automation, prompt execution, hotstrings, key remapping, and a quick prompt popup menu into one lightweight Windows tray application.
+**SwiftDeck** is a practical Windows desktop productivity tool designed to help team members handle routine operational tasks more efficiently.
 
-It is designed especially for finance, sales administration, accounting, credit control, and other back-office teams that repeatedly work with ERP systems, monthly closing folders, shared drives, standard emails, and routine operational text.
-
-> **Accelerate Team Month-End Closings · Prevent Human Errors · Reduce Repetitive Tasks · Standardize Workflows**
-
----
+In daily office administration and reporting, workers repeatedly navigate deep network folder paths, run recurring SQL/ERP queries, and paste standard text prompts. SwiftDeck organizes these repetitive actions into quick hotkey shortcuts (Alt + Space), enabling users to jump to frequently used workspaces, insert standard report templates, and perform everyday calculations conveniently without repetitive clicks.
 
 ## Core Features
 
