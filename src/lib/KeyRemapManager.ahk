@@ -27,10 +27,10 @@ class KeyRemapManager {
 
     BuildUI(guiObj) {
         startX := this.parentGui ? 35 : 25
-        startY := this.parentGui ? 120 : 80
+        startY := this.parentGui ? 110 : 80
         listHeight := this.parentGui ? 290 : 345
-        exampleOffset := this.parentGui ? 320 : 375
-        autoSaveOffset := this.parentGui ? 370 : 425
+        exampleOffset := this.parentGui ? 325 : 375
+        autoSaveOffset := this.parentGui ? 355 : 425
         guiObj.SetFont("s10", "Segoe UI")
         this.mainHwnd := guiObj.Hwnd
 

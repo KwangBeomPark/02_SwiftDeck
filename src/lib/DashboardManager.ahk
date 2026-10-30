@@ -25,35 +25,40 @@ class DashboardManager {
     }
 
     __New() {
-        ; Measured design size of this window. Above roughly 150% scaling on a
-        ; 1080p panel the scaled window is taller than the work area, and the
-        ; part that falls off the bottom — Factory Reset, backup and restore —
-        ; cannot be scrolled or dragged back into view.
-        this.hGui := Gui("+AlwaysOnTop +OwnDialogs" . GetFittingGuiOptions(514, 665),
+        ; Measured design size of this window. It used to be 514x665, which at
+        ; 150% on a 1080p panel scaled to 998px of a 1008px work area: the
+        ; window filled the screen and, having no resize border, could not be
+        ; made smaller. Every tab now shares one compact height instead.
+        ; Above the size the screen can hold, the part that falls off the
+        ; bottom — Factory Reset, backup and restore — could not be scrolled
+        ; or dragged back into view, so that case still opts out of scaling.
+        this.hGui := Gui("+AlwaysOnTop +OwnDialogs" . GetFittingGuiOptions(514, 550),
             "SwiftDeck App Settings")
         ApplyTheme(this.hGui, "SwiftDeck", "")
         this.hGui.OnEvent("Close", ObjBindMethod(this, "HandleClose"))
+        ; Esc goes through the same unsaved-changes check as the close button.
+        this.hGui.OnEvent("Escape", ObjBindMethod(this, "HandleClose"))
 
         this.hGui.SetFont("s9 c" . THEME_MUTED . " norm", "Segoe UI")
-        this.txtHeaderStatus := this.hGui.Add("Text", "x20 y40 w280 h20 BackgroundTrans",
+        this.txtHeaderStatus := this.hGui.Add("Text", "x20 y40 w280 h18 BackgroundTrans",
             "v" . g_appVersion . " | FinOps Automation && HotKey Suite")
 
         ; Add top-right global actions. Update stays hidden until a newer release is detected.
         this.hGui.SetFont("s9 cCCCCCC norm", "Segoe UI")
-        btnGlobalManual := this.hGui.Add("Button", "x310 y20 w80 h28", "📘 Manual")
+        btnGlobalManual := this.hGui.Add("Button", "x310 y14 w80 h28", "📘 Manual")
         btnGlobalManual.OnEvent("Click", (*) => OpenAppManual("", this.hGui.Hwnd))
 
-        this.btnGlobalInfo := this.hGui.Add("Button", "x395 y20 w85 h28", "ℹ️ App Info")
+        this.btnGlobalInfo := this.hGui.Add("Button", "x395 y14 w85 h28", "ℹ️ App Info")
         this.btnGlobalInfo.OnEvent("Click", (*) => ShowAppInformation(this.hGui.Hwnd))
 
-        this.btnGlobalUpdate := this.hGui.Add("Button", "x310 y50 w170 h22 Hidden", "⬆ Update")
+        this.btnGlobalUpdate := this.hGui.Add("Button", "x310 y45 w170 h22 Hidden", "⬆ Update")
         this.btnGlobalUpdate.OnEvent("Click", ObjBindMethod(this, "HandleUpdateAction"))
         this.hGui.SetFont("s10 c" . THEME_TEXT . " norm", "Segoe UI")
 
         ; Create Tab Control
-        ; Height is driven by the General tab, the tallest panel: it now carries a
-        ; fourth hotkey group. The other tabs simply gain trailing whitespace.
-        this.mainTab := this.hGui.Add("Tab3", "x20 y80 w460 h535", ["📁 Folders", "⌨️ Prompts", "✏️ Hotstrings", "🔀 Key Remap", "⚙️ General"])
+        ; Every tab lays out from y110 and ends by y490, so the panels share one
+        ; height and none of them leaves a band of empty space at the bottom.
+        this.mainTab := this.hGui.Add("Tab3", "x20 y70 w460 h430", ["📁 Folders", "⌨️ Prompts", "✏️ Hotstrings", "🔀 Key Remap", "⚙️ General"])
 
         this.mainTab.UseTab(1)
         this.folderMgr := FolderManager(this.hGui)

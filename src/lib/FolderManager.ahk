@@ -36,12 +36,12 @@ class FolderManager {
     BuildUI(guiObj) {
         this.mainHwnd := guiObj.Hwnd
         startX := this.parentGui ? 35 : 25
-        startY := this.parentGui ? 120 : 80
-        listHeight := this.parentGui ? 300 : 345
-        moveUpOffset := this.parentGui ? 245 : 290
-        moveDownOffset := this.parentGui ? 285 : 330
-        autoSaveOffset := this.parentGui ? 345 : 390
-        hintOffset := this.parentGui ? 375 : 435
+        startY := this.parentGui ? 110 : 80
+        listHeight := this.parentGui ? 290 : 345
+        moveUpOffset := this.parentGui ? 240 : 290
+        moveDownOffset := this.parentGui ? 280 : 330
+        autoSaveOffset := this.parentGui ? 355 : 390
+        hintOffset := this.parentGui ? 325 : 435
         guiObj.SetFont("s10", "Segoe UI")
 
         guiObj.Add("Text", "x" . startX . " y" . startY . " w400", "Saved Folders:")
@@ -65,11 +65,16 @@ class FolderManager {
         btnReset := guiObj.Add("Button", "x" . (startX + 310) . " y" . (startY - 5) . " w95 h25", "⚠️ Reset")
         btnReset.OnEvent("Click", (*) => this.RequestReset())
 
+        ; Name the hotkey actually configured, not the shipped default: once it
+        ; is changed in General, "default: F1" points at a key that does nothing.
+        settings := ConfigGetFallbackAppSettings()
+        try settings := ConfigReadAppSettings()
+
         guiObj.SetFont("s9 c" . THEME_MUTED . " norm", "Segoe UI")
+        guiObj.Add("Text", "x" . startX . " y" . (startY + hintOffset) . " w405 Center",
+            "💡 Press " . FormatHotkeyDisplay(settings.MainHotkey) . " anywhere to open the folder menu.")
         guiObj.Add("Text", "x" . startX . " y" . (startY + autoSaveOffset) . " w405 Center", "✓ Changes are saved and applied immediately.")
         guiObj.SetFont("s10 c" . THEME_TEXT . " norm", "Segoe UI")
-
-        guiObj.Add("Text", "x" . startX . " y" . (startY + hintOffset) . " w405 c" . THEME_MUTED . " Center", "💡 Press the Folder Menu Hotkey (default: F1) anywhere to open this menu.")
 
         if (!this.parentGui) {
             btnClose := guiObj.Add("Button", "x" . (startX + 310) . " y" . (startY + 465) . " w95 h35", "Close")

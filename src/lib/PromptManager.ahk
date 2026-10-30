@@ -103,12 +103,15 @@ class PromptManager {
     }
 
     BuildUI(guiObj) {
-        startX := this.parentGui ? 30 : 30
-        startY := this.parentGui ? 120 : 20
+        ; Dashboard tabs share x35 and a button column at x+310, so switching
+        ; tabs does not shift the layout sideways.
+        startX := this.parentGui ? 35 : 30
+        startY := this.parentGui ? 110 : 20
         listHeight := this.parentGui ? 165 : 210
         previewLabelOffset := this.parentGui ? 230 : 275
         previewEditOffset := this.parentGui ? 250 : 295
-        autoSaveOffset := this.parentGui ? 370 : 415
+        previewHeight := this.parentGui ? 95 : 105
+        autoSaveOffset := this.parentGui ? 355 : 415
         this.mainHwnd := guiObj.Hwnd
         if (!this.parentGui)
             guiObj.OnEvent("Close", (*) => guiObj.Destroy())
@@ -128,36 +131,36 @@ class PromptManager {
         guiObj.Add("Text", "x" . startX . " y" . startY . " w300", slotText)
 
         guiObj.SetFont("cBlack")
-        this.ddlNumpad := guiObj.Add("DropDownList", "x" . (startX + 220) . " y" . (startY - 5) . " w180 Choose1", slotChoices)
+        this.ddlNumpad := guiObj.Add("DropDownList", "x" . (startX + 220) . " y" . (startY - 5) . " w185 Choose1", slotChoices)
         guiObj.SetFont("c" . THEME_TEXT)
 
         guiObj.Add("Text", "x" . startX . " y" . (startY + 35) . " w200", "② Prompts in this Slot:")
 
         guiObj.SetFont("cBlack")
-        this.lbItems := guiObj.Add("ListBox", "x" . startX . " y" . (startY + 55) . " w295 h" . listHeight)
+        this.lbItems := guiObj.Add("ListBox", "x" . startX . " y" . (startY + 55) . " w300 h" . listHeight)
         guiObj.SetFont("c" . THEME_TEXT)
 
         guiObj.Add("Text", "x" . startX . " y" . (startY + previewLabelOffset) . " w200", "③ Content Preview:")
 
         guiObj.SetFont("c444444")
-        this.edtPreview := guiObj.Add("Edit", "x" . startX . " y" . (startY + previewEditOffset) . " w400 h105 ReadOnly Multi BackgroundD4D4D4", "")
+        this.edtPreview := guiObj.Add("Edit", "x" . startX . " y" . (startY + previewEditOffset) . " w405 h" . previewHeight . " ReadOnly Multi BackgroundD4D4D4", "")
         guiObj.SetFont("c" . THEME_TEXT)
 
         guiObj.SetFont("s9 cD03A3A norm", "Segoe UI")
-        btnReset := guiObj.Add("Button", "x" . (startX + 305) . " y" . (startY + 25) . " w95 h25", "⚠️ Reset")
+        btnReset := guiObj.Add("Button", "x" . (startX + 310) . " y" . (startY + 25) . " w95 h25", "⚠️ Reset")
         btnReset.OnEvent("Click", (*) => this.RequestReset())
         guiObj.SetFont("s10 c" . THEME_TEXT . " norm", "Segoe UI")
 
-        btnNew := guiObj.Add("Button", "x" . (startX + 305) . " y" . (startY + 55) . " w95 h35", "➕ New")
-        btnEdit := guiObj.Add("Button", "x" . (startX + 305) . " y" . (startY + 95) . " w95 h35", "✏️ Edit")
-        btnDel := guiObj.Add("Button", "x" . (startX + 305) . " y" . (startY + 135) . " w95 h35", "❌ Delete")
+        btnNew := guiObj.Add("Button", "x" . (startX + 310) . " y" . (startY + 55) . " w95 h35", "➕ New")
+        btnEdit := guiObj.Add("Button", "x" . (startX + 310) . " y" . (startY + 95) . " w95 h35", "✏️ Edit")
+        btnDel := guiObj.Add("Button", "x" . (startX + 310) . " y" . (startY + 135) . " w95 h35", "❌ Delete")
         guiObj.SetFont("s9 cWhite norm", "Segoe UI")
-        btnUp := guiObj.Add("Button", "x" . (startX + 305) . " y" . (startY + 175) . " w95 h35", "▲ Up")
-        btnDown := guiObj.Add("Button", "x" . (startX + 305) . " y" . (startY + 215) . " w95 h35", "▼ Down")
+        btnUp := guiObj.Add("Button", "x" . (startX + 310) . " y" . (startY + 175) . " w95 h35", "▲ Up")
+        btnDown := guiObj.Add("Button", "x" . (startX + 310) . " y" . (startY + 215) . " w95 h35", "▼ Down")
         guiObj.SetFont("s10 c" . THEME_TEXT . " norm", "Segoe UI")
 
         if (!this.parentGui) {
-            btnClose := guiObj.Add("Button", "x" . (startX + 305) . " y" . (startY + 455) . " w95 h35", "Close")
+            btnClose := guiObj.Add("Button", "x" . (startX + 310) . " y" . (startY + 455) . " w95 h35", "Close")
             btnClose.OnEvent("Click", (*) => guiObj.Destroy())
         }
 
@@ -171,7 +174,7 @@ class PromptManager {
         btnDown.OnEvent("Click", (*) => this.MoveItem(1))
 
         guiObj.SetFont("s9 c" . THEME_MUTED . " norm", "Segoe UI")
-        guiObj.Add("Text", "x" . startX . " y" . (startY + autoSaveOffset) . " w400 Center", "✓ Changes are saved and applied immediately.")
+        guiObj.Add("Text", "x" . startX . " y" . (startY + autoSaveOffset) . " w405 Center", "✓ Changes are saved and applied immediately.")
         guiObj.SetFont("s10 c" . THEME_TEXT . " norm", "Segoe UI")
 
         this.RefreshList()

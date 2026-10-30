@@ -42,7 +42,7 @@ class PreferencesManager {
     BuildUI(guiObj) {
         ; Standalone window starts lower (header takes space)
         startX := this.parentGui ? 35 : 25
-        startY := this.parentGui ? 120 : 80
+        startY := this.parentGui ? 110 : 80
 
         guiObj.SetFont("s10 c" . THEME_TEXT, "Segoe UI")
 
@@ -61,14 +61,16 @@ class PreferencesManager {
         mainParsed := ParseKeyString(mainHotkey)
         promptParsed := ParseKeyString(promptMod)
 
+        ; Each hotkey group is one row of modifiers and a key with its live
+        ; preview underneath; the old "Modifiers && ..." caption rows only
+        ; restated that and cost the dashboard 56px of height.
         ; --- Main Hotkey GroupBox ---
-        guiObj.Add("GroupBox", "x" . startX . " y" . startY . " w410 h85 c" . THEME_ACCENT, "📁 Favorites Menu Hotkey")
-        guiObj.Add("Text", "x" . (startX + 15) . " y" . (startY + 20) . " w380", "Modifiers && Base Key:")
+        guiObj.Add("GroupBox", "x" . startX . " y" . startY . " w410 h62 c" . THEME_ACCENT, "📁 Favorites Menu Hotkey")
 
-        this.chkMainCtrl := guiObj.Add("CheckBox", "x" . (startX + 15) . " y" . (startY + 48) . " w50", "Ctrl")
-        this.chkMainShift := guiObj.Add("CheckBox", "x" . (startX + 70) . " y" . (startY + 48) . " w55", "Shift")
-        this.chkMainWin := guiObj.Add("CheckBox", "x" . (startX + 130) . " y" . (startY + 48) . " w50", "Win")
-        this.chkMainAlt := guiObj.Add("CheckBox", "x" . (startX + 185) . " y" . (startY + 48) . " w45", "Alt")
+        this.chkMainCtrl := guiObj.Add("CheckBox", "x" . (startX + 15) . " y" . (startY + 22) . " w50", "Ctrl")
+        this.chkMainShift := guiObj.Add("CheckBox", "x" . (startX + 70) . " y" . (startY + 22) . " w55", "Shift")
+        this.chkMainWin := guiObj.Add("CheckBox", "x" . (startX + 130) . " y" . (startY + 22) . " w50", "Win")
+        this.chkMainAlt := guiObj.Add("CheckBox", "x" . (startX + 185) . " y" . (startY + 22) . " w45", "Alt")
 
         this.chkMainCtrl.Value := mainParsed.Mods.Ctrl
         this.chkMainShift.Value := mainParsed.Mods.Shift
@@ -76,13 +78,13 @@ class PreferencesManager {
         this.chkMainAlt.Value := mainParsed.Mods.Alt
 
         guiObj.SetFont("cBlack")
-        this.cbMainKey := guiObj.Add("ComboBox", "x" . (startX + 240) . " y" . (startY + 45) . " w155",
+        this.cbMainKey := guiObj.Add("ComboBox", "x" . (startX + 240) . " y" . (startY + 19) . " w155",
             PreferencesManager.GetHotkeyBaseKeys())
         guiObj.SetFont("c" . THEME_TEXT)
         this.cbMainKey.Text := mainParsed.Key
 
         guiObj.SetFont("s8 c" . THEME_ACCENT, "Segoe UI")
-        this.txtMainPreview := guiObj.Add("Text", "x" . (startX + 15) . " y" . (startY + 70) . " w380 h13", "")
+        this.txtMainPreview := guiObj.Add("Text", "x" . (startX + 15) . " y" . (startY + 44) . " w380 h13", "")
         guiObj.SetFont("s10 c" . THEME_TEXT, "Segoe UI")
 
         for ctrl in [this.chkMainCtrl, this.chkMainShift, this.chkMainWin, this.chkMainAlt]
@@ -91,13 +93,12 @@ class PreferencesManager {
         this.UpdateMainHotkeyPreview()
 
         ; --- Quick Prompts GroupBox ---
-        guiObj.Add("GroupBox", "x" . startX . " y" . (startY + 100) . " w410 h85 c" . THEME_ACCENT, "⌨️ Quick Prompts Hotkey")
-        guiObj.Add("Text", "x" . (startX + 15) . " y" . (startY + 120) . " w380", "Modifiers && Number Key Type:")
+        guiObj.Add("GroupBox", "x" . startX . " y" . (startY + 68) . " w410 h62 c" . THEME_ACCENT, "⌨️ Quick Prompts Hotkey")
 
-        this.chkPromptCtrl := guiObj.Add("CheckBox", "x" . (startX + 15) . " y" . (startY + 148) . " w50", "Ctrl")
-        this.chkPromptShift := guiObj.Add("CheckBox", "x" . (startX + 70) . " y" . (startY + 148) . " w55", "Shift")
-        this.chkPromptWin := guiObj.Add("CheckBox", "x" . (startX + 130) . " y" . (startY + 148) . " w50", "Win")
-        this.chkPromptAlt := guiObj.Add("CheckBox", "x" . (startX + 185) . " y" . (startY + 148) . " w45", "Alt")
+        this.chkPromptCtrl := guiObj.Add("CheckBox", "x" . (startX + 15) . " y" . (startY + 90) . " w50", "Ctrl")
+        this.chkPromptShift := guiObj.Add("CheckBox", "x" . (startX + 70) . " y" . (startY + 90) . " w55", "Shift")
+        this.chkPromptWin := guiObj.Add("CheckBox", "x" . (startX + 130) . " y" . (startY + 90) . " w50", "Win")
+        this.chkPromptAlt := guiObj.Add("CheckBox", "x" . (startX + 185) . " y" . (startY + 90) . " w45", "Alt")
 
         this.chkPromptCtrl.Value := promptParsed.Mods.Ctrl
         this.chkPromptShift.Value := promptParsed.Mods.Shift
@@ -106,12 +107,12 @@ class PreferencesManager {
 
         numpadChoose := (promptUseNumpad == 1) ? 1 : 2
         guiObj.SetFont("cBlack")
-        this.ddlPromptNumpad := guiObj.Add("DropDownList", "x" . (startX + 240) . " y" . (startY + 145) . " w155 Choose" . numpadChoose, ["Numpad 0~9", "Standard 0~9"])
+        this.ddlPromptNumpad := guiObj.Add("DropDownList", "x" . (startX + 240) . " y" . (startY + 87) . " w155 Choose" . numpadChoose, ["Numpad 0~9", "Standard 0~9"])
         guiObj.SetFont("c" . THEME_TEXT)
 
         ; --- Live hotkey preview (updates as modifiers / number type change) ---
         guiObj.SetFont("s8 c" . THEME_ACCENT, "Segoe UI")
-        this.txtPromptPreview := guiObj.Add("Text", "x" . (startX + 15) . " y" . (startY + 170) . " w380 h13", "")
+        this.txtPromptPreview := guiObj.Add("Text", "x" . (startX + 15) . " y" . (startY + 112) . " w380 h13", "")
         guiObj.SetFont("s10 c" . THEME_TEXT, "Segoe UI")
 
         for ctrl in [this.chkPromptCtrl, this.chkPromptShift, this.chkPromptWin, this.chkPromptAlt]
@@ -125,35 +126,36 @@ class PreferencesManager {
         emojiParsed := ParseKeyString(settings.EmojiHotkey)
         exitParsed := ParseKeyString(settings.ExitHotkey)
 
-        guiObj.Add("GroupBox", "x" . startX . " y" . (startY + 200) . " w410 h88 c" . THEME_ACCENT, "😀 Emoji && Exit Hotkeys")
+        guiObj.Add("GroupBox", "x" . startX . " y" . (startY + 136) . " w410 h82 c" . THEME_ACCENT, "😀 Emoji && Exit Hotkeys")
 
-        this.emojiControls := this.AddHotkeyRow(guiObj, startX, startY + 222, "Emoji:", emojiParsed)
-        this.exitControls := this.AddHotkeyRow(guiObj, startX, startY + 252, "Exit:", exitParsed)
+        this.emojiControls := this.AddHotkeyRow(guiObj, startX, startY + 157, "Emoji:", emojiParsed)
+        this.exitControls := this.AddHotkeyRow(guiObj, startX, startY + 186, "Exit:", exitParsed)
 
         ; --- Save Preferences ---
         guiObj.SetFont("s10 cWhite bold", "Segoe UI")
-        this.btnSave := guiObj.Add("Button", "x" . startX . " y" . (startY + 300) . " w410 h38", "💾 Save && Apply")
+        this.btnSave := guiObj.Add("Button", "x" . startX . " y" . (startY + 226) . " w410 h34", "💾 Save && Apply")
         this.btnSave.OnEvent("Click", ObjBindMethod(this, "OnSavePreferences"))
         guiObj.SetFont("c" . THEME_TEXT . " norm", "Segoe UI")
 
         ; --- Data, Startup & Recovery ---
-        guiObj.Add("GroupBox", "x" . startX . " y" . (startY + 350) . " w410 h125", "Data, Startup && Recovery")
+        ; The buttons span the group's full inner width (x+15 to x+395).
+        guiObj.Add("GroupBox", "x" . startX . " y" . (startY + 268) . " w410 h112", "Data, Startup && Recovery")
 
-        this.chkStartup := guiObj.Add("CheckBox", "x" . (startX + 15) . " y" . (startY + 370) . " w380 h22", "🚀 Run SwiftDeck when Windows starts")
+        this.chkStartup := guiObj.Add("CheckBox", "x" . (startX + 15) . " y" . (startY + 287) . " w380 h22", "🚀 Run SwiftDeck when Windows starts")
         this.chkStartup.Value := ConfigIsStartupEnabled()
         this.chkStartup.OnEvent("Click", ObjBindMethod(this, "OnStartupToggle"))
 
-        btnOpenSettings := guiObj.Add("Button", "x" . (startX + 15) . " y" . (startY + 400) . " w120 h30", "📂 Open Folder")
+        btnOpenSettings := guiObj.Add("Button", "x" . (startX + 15) . " y" . (startY + 312) . " w125 h28", "📂 Open Folder")
         btnOpenSettings.OnEvent("Click", (*) => OpenFolder(ConfigGetSettingsFolder()))
 
-        btnBackup := guiObj.Add("Button", "x" . (startX + 140) . " y" . (startY + 400) . " w110 h30", "📥 Backup Saved")
+        btnBackup := guiObj.Add("Button", "x" . (startX + 145) . " y" . (startY + 312) . " w125 h28", "📥 Backup Saved")
         btnBackup.OnEvent("Click", (*) => BackupConfigs(true))
 
-        btnRestore := guiObj.Add("Button", "x" . (startX + 255) . " y" . (startY + 400) . " w105 h30", "🔄 Restore")
+        btnRestore := guiObj.Add("Button", "x" . (startX + 275) . " y" . (startY + 312) . " w120 h28", "🔄 Restore")
         btnRestore.OnEvent("Click", ObjBindMethod(this, "OnRestoreSettings"))
 
         guiObj.SetFont("s9 cD03A3A bold", "Segoe UI")
-        btnResetAll := guiObj.Add("Button", "x" . (startX + 15) . " y" . (startY + 435) . " w345 h30", "⚠️ FACTORY RESET ALL SETTINGS")
+        btnResetAll := guiObj.Add("Button", "x" . (startX + 15) . " y" . (startY + 344) . " w380 h28", "⚠️ FACTORY RESET ALL SETTINGS")
         btnResetAll.OnEvent("Click", ObjBindMethod(this, "OnFactoryReset"))
         guiObj.SetFont("s10 c" . THEME_TEXT . " norm", "Segoe UI")
     }

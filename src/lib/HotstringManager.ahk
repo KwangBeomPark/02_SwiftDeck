@@ -31,12 +31,13 @@ class HotstringManager {
     }
 
     BuildUI(guiObj) {
-        startX := this.parentGui ? 30 : 30
-        startY := this.parentGui ? 120 : 20
-        listHeight := this.parentGui ? 290 : 345
-        moveUpOffset := this.parentGui ? 245 : 300
-        moveDownOffset := this.parentGui ? 285 : 340
-        autoSaveOffset := this.parentGui ? 380 : 435
+        ; Same x35 origin as the other dashboard tabs (see PromptManager).
+        startX := this.parentGui ? 35 : 30
+        startY := this.parentGui ? 110 : 20
+        listHeight := this.parentGui ? 270 : 345
+        moveUpOffset := this.parentGui ? 270 : 300
+        moveDownOffset := this.parentGui ? 310 : 340
+        autoSaveOffset := this.parentGui ? 355 : 435
         this.mainHwnd := guiObj.Hwnd
         if (!this.parentGui)
             guiObj.OnEvent("Close", (*) => guiObj.Destroy())
