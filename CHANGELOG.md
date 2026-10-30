@@ -32,6 +32,12 @@
 - Emoji & Symbols 메뉴(`Ctrl+Win+Space`)에서 내장 기호 세트와 Hotstring 그룹이 따로 나열돼 "Arrows"·"Math"가 두 번, → ± ≠ ★ ✓ $ € 등이 두 곳에 나오던 중복을 없앴습니다. 이제 분류마다 한 번씩, 트리거가 있는 기호는 `→   Right  [>>]`처럼 트리거와 함께 먼저 나오고 나머지 내장 기호가 이어집니다. "Marks & Bullets"와 "Checks"는 "Marks & Checks"로 합쳤고, 직접 만든 그룹은 기존처럼 아래에 따로 나옵니다.
 - 이미 쓰던 설정 파일은 바뀌지 않습니다. 기호 메뉴는 기존 그룹 이름(Bullets_Indicators 포함)도 같은 분류로 합쳐 보여주고 ①~⑩도 메뉴에서 고를 수 있지만, `1..` 트리거는 Hotstrings 탭에서 추가하거나 Reset해야 생깁니다.
 
+### 프롬프트 슬롯 이름
+
+- 프롬프트 슬롯에 이름을 붙일 수 있습니다. Prompts 탭에서 슬롯을 고른 뒤 `🏷️ Name Slot`을 누르면 됩니다(최대 20자, 비우면 이름 삭제).
+- 이름은 설정 드롭다운(`Numpad 1 · Outlook`), 프롬프트 메뉴 `Shift+Win+Space`(`⌨️ Win+Num1  ·  Outlook`), 단축키 연타 툴팁(`Win+Numpad1 · Outlook (2/4)`)과 빈 슬롯 안내에 함께 표시됩니다. 단축키 표시는 그대로입니다.
+- 새 설치·Prompts 초기화 시 기본 이름은 1 Outlook, 2 Edge, 3 AI Writing입니다. 이미 쓰던 설정 파일에는 이름이 자동으로 들어가지 않으며, 이름은 별도 `[SlotNames]` 섹션에 저장돼 이전 버전에서도 그대로 열립니다.
+
 ## 1.4.1 — 2026-10-06
 
 ### PL Suite 표준화 및 배포 파이프라인 정비 (Packaging & Architecture Modernization)

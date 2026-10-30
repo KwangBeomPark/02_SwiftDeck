@@ -25,9 +25,11 @@ class PromptManager {
         if !ConfigExists("Prompts")
             return
 
+        slotName := ConfigReadPromptSlotNames()[groupNum]
         if (PromptManager.dataGroup.Length = 0) {
             ; The rest of the UI is English; this one string was bilingual.
-            ToolTip("⚠️ Quick Prompt slot " . groupNum . " is empty`nAdd prompts in App Settings → Prompts")
+            ToolTip("⚠️ Quick Prompt slot " . groupNum . (slotName != "" ? " (" . slotName . ")" : "")
+                . " is empty`nAdd prompts in App Settings → Prompts")
             SetTimer(() => ToolTip(), -1000)
             return
         }
@@ -39,7 +41,7 @@ class PromptManager {
             msg: ""
         })
 
-        hkDisplay := FormatHotkeyDisplay(A_ThisHotkey)
+        hkDisplay := FormatHotkeyDisplay(A_ThisHotkey) . (slotName != "" ? " · " . slotName : "")
         total := PromptManager.dataGroup.Length
 
         while PromptHotkeyModifierPressed(A_ThisHotkey) {
@@ -47,7 +49,7 @@ class PromptManager {
                 PromptManager.selectedIndex := (PromptManager.selectedIndex < PromptManager.dataGroup.Length) ? PromptManager.selectedIndex + 1 :
                     1
                 sel := PromptManager.selectedIndex
-                ; Show the hotkey and position (e.g. "Win+Numpad1 (2/5)") above the title.
+                ; Show the hotkey, slot name and position (e.g. "Win+Numpad1 · Outlook (2/5)") above the title.
                 ToolTip(hkDisplay . " (" . sel . "/" . total . ")`n" . PromptManager.dataGroup[sel].label)
                 Sleep(200)
             } else {
@@ -89,6 +91,7 @@ class PromptManager {
     __New(parentGui := "") {
         this.parentGui := parentGui
         this.localData := ConfigReadPromptData()
+        this.slotNames := ConfigReadPromptSlotNames()
         if (parentGui)
             this.BuildUI(parentGui)
     }
@@ -120,21 +123,24 @@ class PromptManager {
         migrated := MigratePromptModifier(settings.PromptModifier, settings.PromptUseNumpad)
         friendlyMod := FormatHotkeyDisplay(migrated.Mod)
         keySuffix := migrated.UseNumpad ? "Numpad" : "Number"
+        this.slotKeySuffix := keySuffix
         slotText := "① Select Slot (" . friendlyMod . keySuffix . "):"
-
-        slotChoices := []
-        loop 10 {
-            slotNum := Mod(A_Index, 10)
-            slotChoices.Push(keySuffix . " " . slotNum)
-        }
 
         guiObj.Add("Text", "x" . startX . " y" . startY . " w300", slotText)
 
         guiObj.SetFont("cBlack")
-        this.ddlNumpad := guiObj.Add("DropDownList", "x" . (startX + 220) . " y" . (startY - 5) . " w185 Choose1", slotChoices)
+        this.ddlNumpad := guiObj.Add("DropDownList", "x" . (startX + 220) . " y" . (startY - 5) . " w185 Choose1", this.BuildSlotChoices())
+        ; Let the open list run wider than the box, so a long slot name is
+        ; shown in full there even when the closed box cuts it off.
+        SendMessage(0x0160, Round(280 * A_ScreenDPI / 96), 0, this.ddlNumpad)  ; CB_SETDROPPEDWIDTH
         guiObj.SetFont("c" . THEME_TEXT)
 
         guiObj.Add("Text", "x" . startX . " y" . (startY + 35) . " w200", "② Prompts in this Slot:")
+
+        guiObj.SetFont("s9 c" . THEME_TEXT . " norm", "Segoe UI")
+        btnName := guiObj.Add("Button", "x" . (startX + 205) . " y" . (startY + 25) . " w95 h25", "🏷️ Name Slot")
+        btnName.OnEvent("Click", (*) => this.RenameSlot(guiObj))
+        guiObj.SetFont("s10 c" . THEME_TEXT . " norm", "Segoe UI")
 
         guiObj.SetFont("cBlack")
         this.lbItems := guiObj.Add("ListBox", "x" . startX . " y" . (startY + 55) . " w300 h" . listHeight)
@@ -195,7 +201,7 @@ class PromptManager {
         popup.BackColor := "FFFFFF"
         popup.SetFont("s10 cBlack", "Segoe UI")
 
-        currNum := Integer(SubStr(this.ddlNumpad.Text, 8))
+        currNum := this.CurrentSlotNum()
 
         tVal := ""
         mVal := ""
@@ -367,7 +373,7 @@ class PromptManager {
 
     EditSelectedItem() {
         idx := this.lbItems.Value
-        currNum := Integer(SubStr(this.ddlNumpad.Text, 8))
+        currNum := this.CurrentSlotNum()
         if (idx > 0 && idx <= this.localData[currNum].Length) {
             this.ShowEditPopup(true, idx)
         }
@@ -379,10 +385,71 @@ class PromptManager {
     ; Open buttons invite exactly that) are overwritten by the stale snapshot.
     ReloadFromDisk() {
         this.localData := ConfigReadPromptData()
+        this.slotNames := ConfigReadPromptSlotNames()
+        if this.HasOwnProp("ddlNumpad")
+            this.UpdateSlotChoices()
+    }
+
+    ; Slots 1-9 then 0, the order of the number row. A named slot shows its
+    ; name after the key, e.g. "Numpad 1 · Outlook".
+    BuildSlotChoices() {
+        choices := []
+        loop 10 {
+            slotNum := Mod(A_Index, 10)
+            label := this.slotKeySuffix . " " . slotNum
+            if (this.slotNames[slotNum] != "")
+                label .= " · " . this.slotNames[slotNum]
+            choices.Push(label)
+        }
+        return choices
+    }
+
+    ; Rebuilds the dropdown text without moving the selection; Choose raises
+    ; no Change event, so the list below stays as it is.
+    UpdateSlotChoices() {
+        selected := this.ddlNumpad.Value
+        this.ddlNumpad.Delete()
+        this.ddlNumpad.Add(this.BuildSlotChoices())
+        this.ddlNumpad.Choose(selected ? selected : 1)
+    }
+
+    ; The dropdown position maps straight to the slot number (see
+    ; BuildSlotChoices). Its text cannot be parsed for it: it carries the name.
+    CurrentSlotNum() {
+        return Mod(this.ddlNumpad.Value, 10)
+    }
+
+    RenameSlot(guiObj) {
+        slotNum := this.CurrentSlotNum()
+        oldName := this.slotNames[slotNum]
+        maxLength := ConfigGetMaxPromptSlotNameLength()
+
+        guiObj.Opt("+OwnDialogs")
+        ib := InputBox("Name for slot " . slotNum . " (e.g. Outlook, Edge), up to " . maxLength . " characters."
+            . "`nLeave it empty to remove the name.", "Name Slot", "w380 h140", oldName)
+        if (ib.Result != "OK")
+            return
+        newName := ConfigNormalizePromptSlotName(ib.Value)
+        if (newName == oldName)
+            return
+        if (StrLen(newName) > maxLength) {
+            MsgBox("⚠️ A slot name can be up to " . maxLength . " characters.", "Name Too Long", 262192)
+            return
+        }
+
+        try {
+            ConfigWritePromptSlotName(slotNum, newName)
+        } catch Error as err {
+            MsgBox("❌ The slot name could not be saved.`n`nError: " . err.Message, "Save Failed", 262160)
+            return
+        }
+        this.slotNames := ConfigReadPromptSlotNames()
+        this.UpdateSlotChoices()
+        this.ShowAutoSaveFeedback(newName == "" ? "✅ Slot name removed" : "✅ Slot name saved")
     }
 
     RefreshList(targetIdx := 0) {
-        currNum := Integer(SubStr(this.ddlNumpad.Text, 8))
+        currNum := this.CurrentSlotNum()
 
         listData := []
         for idx, item in this.localData[currNum] {
@@ -398,7 +465,7 @@ class PromptManager {
 
     UpdatePreview() {
         idx := this.lbItems.Value
-        currNum := Integer(SubStr(this.ddlNumpad.Text, 8))
+        currNum := this.CurrentSlotNum()
         if (idx > 0 && idx <= this.localData[currNum].Length) {
             this.edtPreview.Value := this.localData[currNum][idx].Msg
         } else {
@@ -408,7 +475,7 @@ class PromptManager {
     }
 
     MoveItem(dir) {
-        currNum := Integer(SubStr(this.ddlNumpad.Text, 8))
+        currNum := this.CurrentSlotNum()
         idx := this.lbItems.Value
         if (idx == 0)
             return
@@ -428,7 +495,7 @@ class PromptManager {
     }
 
     DeleteItem() {
-        currNum := Integer(SubStr(this.ddlNumpad.Text, 8))
+        currNum := this.CurrentSlotNum()
         selIdx := this.lbItems.Value
 
         if (selIdx == 0)

@@ -23,13 +23,19 @@ BuildPromptMenu() {
     settings := ConfigReadAppSettings()
     modDisplay := FormatHotkeyDisplay(settings.PromptModifier)
 
+    slotNames := ConfigReadPromptSlotNames()
+
     ; Build the group label from the real hotkey. Falls back to "Slot N" when
     ; the prompt modifier is empty (hotkeys disabled), since no shortcut applies.
+    ; A slot's name, when it has one, follows the shortcut.
     PromptGroupLabel(num) {
         if (settings.PromptModifier == "")
-            return "⌨️ Slot " . num
-        keyPart := (settings.PromptUseNumpad ? "Num" : "") . num
-        return "⌨️ " . modDisplay . keyPart
+            label := "⌨️ Slot " . num
+        else
+            label := "⌨️ " . modDisplay . (settings.PromptUseNumpad ? "Num" : "") . num
+        if (slotNames[num] != "")
+            label .= "  ·  " . SafeMenuLabel(slotNames[num], "", 30)
+        return label
     }
 
     promptData := ConfigReadPromptData()

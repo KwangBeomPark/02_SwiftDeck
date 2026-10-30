@@ -211,6 +211,49 @@ Run_() {
     Check(ConfigReadPromptEncodingVersion() == beforeVersion,
         "A refused save does not change the encoding marker")
 
+    ; --- Slot names ---
+    Fresh()
+    names := ConfigReadPromptSlotNames()
+    Check(names.Count == 10, "Every slot has a name entry")
+    Check(names[1] == "Outlook" && names[2] == "Edge" && names[3] == "AI Writing",
+        "The shipped defaults name slots 1-3")
+    Check(names[0] == "" && names[4] == "" && names[9] == "", "The other default slots are unnamed")
+
+    ConfigWritePromptSlotName(5, "  Tax`r`nReview  ")
+    Check(ConfigReadPromptSlotNames()[5] == "Tax Review", "A name is stored on one trimmed line")
+    ConfigWritePromptSlotName(1, "R&D = Docs [v2]")
+    Check(ConfigReadPromptSlotNames()[1] == "R&D = Docs [v2]", "A name keeps '&', '=' and brackets")
+    Check(ConfigReadPromptSlotNames()[2] == "Edge", "Naming one slot leaves the others")
+
+    ; Prompt saves rewrite their own sections and must not touch the names.
+    ConfigWritePromptData(ConfigReadPromptData())
+    Check(ConfigReadPromptSlotNames()[5] == "Tax Review", "Saving prompts keeps the slot names")
+
+    ConfigWritePromptSlotName(5, "")
+    Check(ConfigReadPromptSlotNames()[5] == "", "An empty name removes it")
+    Check(InStr(ConfigReadSection("Prompts", "SlotNames"), "5=") == 0, "A removed name leaves no entry")
+
+    ; A file from before slot names has no section: every slot reads unnamed,
+    ; and clearing the last name removes the section without failing.
+    ConfigWriteSection("Prompts", "SlotNames", "")
+    legacyNames := ConfigReadPromptSlotNames()
+    allEmpty := true
+    for slot, n in legacyNames
+        allEmpty := allEmpty && n == ""
+    Check(allEmpty, "A file without [SlotNames] reads every slot as unnamed")
+    threwOnClear := false
+    try ConfigWritePromptSlotName(7, "")
+    catch
+        threwOnClear := true
+    Check(!threwOnClear, "Clearing a name with no [SlotNames] section does not fail")
+    Check(!InStr(ConfigReadSections("Prompts"), "SlotNames"), "No empty [SlotNames] header is left behind")
+
+    ; A hand-edited section: keys other than one digit are ignored.
+    ConfigWriteSection("Prompts", "SlotNames", "0=Zero`n10=Ten`nx=Bad`n4=`n")
+    handNames := ConfigReadPromptSlotNames()
+    Check(handNames[0] == "Zero" && handNames[4] == "" && handNames.Count == 10,
+        "Only keys 0-9 become slot names")
+
     try TestFinishDirectory(g_targetFolder)
     Log("")
     Log(g_failures ? ("RESULT: " . g_failures . " FAILURE(S)") : "RESULT: prompt encoding holds")

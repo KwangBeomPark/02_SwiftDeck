@@ -817,6 +817,47 @@ ConfigWritePromptData(promptData) {
     }
 }
 
+; Optional names for the ten slots ("1=Outlook"). They live in their own
+; [SlotNames] section, so the prompt sections above never carry them and older
+; versions, which do not know the section, simply ignore it. Returns a Map of
+; slot 0-9 to its name, "" for a slot without one.
+ConfigReadPromptSlotNames() {
+    names := Map()
+    loop 10
+        names[A_Index - 1] := ""
+    content := ConfigReadSection("Prompts", "SlotNames", "")
+    loop parse, content, "`n", "`r" {
+        pair := ParseIniKeyValuePairs(A_LoopField)
+        if RegExMatch(pair.Key, "^\d$")
+            names[Integer(pair.Key)] := ConfigNormalizePromptSlotName(pair.Val)
+    }
+    return names
+}
+
+ConfigGetMaxPromptSlotNameLength() {
+    return 20
+}
+
+; A name is shown on one line in a dropdown, a menu and a tooltip.
+ConfigNormalizePromptSlotName(name) {
+    return Trim(RegExReplace(name, "[\r\n\t]+", " "))
+}
+
+; Rewrites only [SlotNames], from what is on disk, so a name saved here cannot
+; undo one changed in the file meanwhile. An empty name removes the slot's entry.
+ConfigWritePromptSlotName(slotNum, name) {
+    names := ConfigReadPromptSlotNames()
+    names[slotNum] := ConfigNormalizePromptSlotName(name)
+    content := ""
+    loop 10 {
+        num := A_Index - 1
+        if (names[num] != "")
+            content .= num . "=" . names[num] . "`n"
+    }
+    ; Empty text deletes the section rather than leaving an empty header.
+    ConfigWriteSection("Prompts", "SlotNames", content)
+}
+
 ; The measured point where storage stops working: 32,767 encoded characters read
 ; back intact, 32,768 makes the whole entry disappear, and 33,000 comes back as
 ; 232 characters — Windows wraps rather than truncating, and the next save writes
@@ -1208,6 +1249,10 @@ GetDefaultFolderData() {
 GetDefaultHotkeyData() {
     return "[Meta]`n"
     . "PromptEncoding=2`n`n"
+    . "[SlotNames]`n"
+    . "1=Outlook`n"
+    . "2=Edge`n"
+    . "3=AI Writing`n`n"
     . "[Numpad1]`n"
     . "1 Outlook Active Email Analyzer=Please analyze this email thread and provide a highly condensed, dense summary in Korean. 1. If I am in CC (Cc/참조), outline the full context, background discussion, and core consensus of the entire thread so I don't miss the big picture. 2. For Tax/Legal/Compliance issues, detail the precise root cause, legal grounds/clauses, and technical terms. 3. For IT System/Finance/Sales improvements, clearly list: Who, What, Why, and the Risks if ignored. Output Style: Keep it extremely compact and space-efficient. Use only single newlines (\\n) for line breaks. Never use double newlines (\\n\\n) or blank lines between sections, so that when copied, the entire output pastes as a single, cohesive, tightly spaced text block while preserving the exact line breaks.`n"
     . "2 Outlook Draft Business Reply=Write a polite and professional reply email in Korean and in English based on the following key points: [insert]. Ensure a formal business tone suitable for corporate communications. Output Style: Extremely compact. Use only single newlines (\\n) for line breaks. Never use double newlines (\\n\\n) or blank lines, so that when copied, the entire output pastes as a single, cohesive, tightly spaced text block while preserving the exact line breaks.`n"
