@@ -269,6 +269,14 @@ RequestExitApp(*) {
     ExitApp()
 }
 
+; Reload drops whatever the General tab has not saved yet, so it asks first,
+; the same way Exit does.
+RequestReloadApp(*) {
+    if (DashboardManager.instance && !DashboardManager.instance.ConfirmUnsavedChanges("reload"))
+        return
+    Reload()
+}
+
 SetupTrayMenu(settings) {
     global g_emojiMenu
     A_TrayMenu.Delete() ; Remove default AHK tray items (Open, Pause, Exit, etc.)
@@ -293,7 +301,7 @@ SetupTrayMenu(settings) {
     A_TrayMenu.Add("ℹ️ App Information", (*) => ShowAppInformation())
     A_TrayMenu.Add("🔍 Check for Updates", (*) => UpdateManager.CheckForUpdates(true))
     A_TrayMenu.Add()
-    A_TrayMenu.Add("🔄 Reload App", (*) => Reload())
+    A_TrayMenu.Add("🔄 Reload App", RequestReloadApp)
     A_TrayMenu.Add("❌ Exit App (" . exitHK . ")", RequestExitApp)
 
     ; Double-click tray icon to open favorites menu

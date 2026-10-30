@@ -164,6 +164,8 @@ class PromptManager {
             btnClose.OnEvent("Click", (*) => guiObj.Destroy())
         }
 
+        this.btnAdd := btnNew
+        this.selectionButtons := [btnEdit, btnDel, btnUp, btnDown]
         this.ddlNumpad.OnEvent("Change", (*) => this.RefreshList(0))
         this.lbItems.OnEvent("Change", (*) => this.UpdatePreview())
         this.lbItems.OnEvent("DoubleClick", (*) => this.EditSelectedItem())
@@ -217,14 +219,29 @@ class PromptManager {
         popup.SetFont("s10 cBlack norm", "Segoe UI")
 
         edtMsg := popup.Add("Edit", "x15 y95 w400 h120 Multi", mVal)
+        ; Keep the caret at the end whenever the text is set from code, so
+        ; Insert Key still appends when the content box was never clicked.
+        ; Setting .Value moves the caret back to the start.
+        MoveMsgCaretToEnd() {
+            msgLen := SendMessage(0x000E, 0, 0, edtMsg)                ; WM_GETTEXTLENGTH
+            SendMessage(0x00B1, msgLen, msgLen, edtMsg)                ; EM_SETSEL
+        }
+        MoveMsgCaretToEnd()
 
         InsertKeyTag := (ItemName, ItemPos, MyMenu) => InsertKeyToEdit(ItemName)
         InsertKeyToEdit(ItemName) {
             if (RegExMatch(ItemName, "\{[^}]+\}", &tagMatch)) {
                 tag := tagMatch[0]
-                edtMsg.Value := edtMsg.Value . tag
+                ; Insert at the caret. The selection is hidden while the menu
+                ; is open, and tabbing into the box selects all of it, so any
+                ; selection is collapsed to its end rather than replaced.
+                selEnd := Buffer(4, 0)
+                SendMessage(0x00B0, 0, selEnd.Ptr, edtMsg)                 ; EM_GETSEL
+                caret := NumGet(selEnd, 0, "UInt")
+                SendMessage(0x00B1, caret, caret, edtMsg)                  ; EM_SETSEL
+                SendMessage(0x00C2, true, StrPtr(tag), edtMsg)             ; EM_REPLACESEL, undoable
                 ControlFocus(edtMsg.Hwnd)
-                Send("^{End}")
+                SendMessage(0x00B7, 0, 0, edtMsg)                          ; EM_SCROLLCARET
             }
         }
 
@@ -282,9 +299,10 @@ class PromptManager {
             ; empty branch is the only failure path — a catch here would be dead
             ; code. The window is re-enabled below whatever the outcome.
             translatedText := GoogleTranslate(srcText, targetLang)
-            if (translatedText != "")
+            if (translatedText != "") {
                 edtMsg.Value := translatedText
-            else
+                MoveMsgCaretToEnd()
+            } else
                 MsgBox("Translation failed.`n`nThe service could not be reached, or it returned"
                     . " nothing usable. Your text was left unchanged.", "Translation Failed", 262160)
             
@@ -366,13 +384,11 @@ class PromptManager {
     RefreshList(targetIdx := 0) {
         currNum := Integer(SubStr(this.ddlNumpad.Text, 8))
 
-        this.lbItems.Delete()
         listData := []
         for idx, item in this.localData[currNum] {
             listData.Push(item.Title)
         }
-        if (listData.Length > 0)
-            this.lbItems.Add(listData)
+        SetListBoxItems(this.lbItems, listData, "This slot is empty. Click ➕ New.")
 
         if (targetIdx > 0 && targetIdx <= listData.Length) {
             this.lbItems.Choose(targetIdx)
@@ -388,6 +404,7 @@ class PromptManager {
         } else {
             this.edtPreview.Value := ""
         }
+        UpdateSelectionButtons(this.lbItems, this.selectionButtons, this.btnAdd)
     }
 
     MoveItem(dir) {
@@ -458,8 +475,7 @@ class PromptManager {
     }
 
     ShowAutoSaveFeedback(message := "✅ Saved and applied") {
-        ToolTip(message)
-        SetTimer(() => ToolTip(), -2000)
+        ShowFeedbackToolTip(message)
     }
 }
 

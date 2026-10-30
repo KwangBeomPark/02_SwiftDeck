@@ -16,6 +16,7 @@
 ; =================================================================================
 class DashboardManager {
     static instance := ""
+    static listKeysHooked := false
 
     static Show(tabIndex := 1) {
         if (!DashboardManager.instance) {
@@ -81,9 +82,42 @@ class DashboardManager {
 
         this.mainTab.UseTab()
         this.mainTab.OnEvent("Change", (*) => this.OnTabChange())
+        if !DashboardManager.listKeysHooked {
+            OnMessage(0x0100, ObjBindMethod(DashboardManager, "OnListKeyDown"))  ; WM_KEYDOWN
+            DashboardManager.listKeysHooked := true
+        }
         UpdateManager.RegisterUiRefreshCallback(ObjBindMethod(this, "RefreshUpdateIndicator"))
         UpdateManager.RegisterPreUpdateCallback(ObjBindMethod(this, "ConfirmUnsavedChanges", "update"))
         this.RefreshUpdateIndicator()
+    }
+
+    ; Del deletes and Enter edits the selected item while one of the four tab
+    ; lists has the focus. Registered once per process, it resolves against the
+    ; dashboard that exists now (it is rebuilt after Discard) and leaves every
+    ; other control, including the lists' popups, untouched.
+    static OnListKeyDown(wParam, lParam, msg, hwnd) {
+        dash := DashboardManager.instance
+        if !dash
+            return
+        if (lParam & 0x40000000)  ; auto-repeat: one action per key press
+            return
+        if (wParam != 0x2E && wParam != 0x0D)  ; VK_DELETE, VK_RETURN
+            return
+        ; This runs for every key typed into the app, so it must never throw.
+        try {
+            for mgr in [dash.folderMgr, dash.promptMgr, dash.hotstringMgr, dash.keyRemapMgr] {
+                if (hwnd != mgr.lbItems.Hwnd)
+                    continue
+                if (wParam == 0x2E)
+                    action := ObjBindMethod(mgr, "DeleteItem")
+                else
+                    action := ObjBindMethod(mgr, mgr.HasMethod("EditFolder") ? "EditFolder" : "EditSelectedItem")
+                ; Run once this message is handled, not inside it: the action
+                ; opens a confirmation box or an edit popup.
+                SetTimer(action, -1)
+                return 0
+            }
+        }
     }
 
     OnTabChange() {
@@ -159,10 +193,8 @@ class DashboardManager {
             return true
         }
 
-        if (showFeedback) {
-            ToolTip("✅ All changes saved")
-            SetTimer(() => ToolTip(), -2000)
-        }
+        if (showFeedback)
+            ShowFeedbackToolTip("✅ All changes saved")
         return true
     }
 
@@ -196,8 +228,10 @@ class DashboardManager {
             . "Cancel = Keep editing"
         result := MsgBox(msg, "Unsaved Changes", 262195)
 
+        ; Exit and Reload end the process right after, so they skip both the
+        ; save-then-reload step and the tooltip nobody would see.
         if (result == "Yes")
-            return this.SaveAllChanges(actionName == "close", actionName != "exit")
+            return this.SaveAllChanges(actionName == "close", actionName != "exit" && actionName != "reload")
         if (result == "No") {
             this.DiscardChanges()
             return true

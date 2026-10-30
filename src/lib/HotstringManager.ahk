@@ -14,6 +14,7 @@
 class HotstringManager {
     __New(parentGui := "") {
         this.parentGui := parentGui
+        this.applyWarning := ""
         hotstringData := ConfigReadHotstringData()
         this.localData := hotstringData.Data
         this.groupOrder := hotstringData.GroupOrder
@@ -81,7 +82,11 @@ class HotstringManager {
             btnClose.OnEvent("Click", (*) => guiObj.Destroy())
         }
 
+        this.btnAdd := btnAdd
+        this.selectionButtons := [btnEdit, btnDel, btnUp, btnDown]
+
         this.cbGroup.OnEvent("Change", (*) => this.OnGroupChange())
+        this.lbItems.OnEvent("Change", (*) => UpdateSelectionButtons(this.lbItems, this.selectionButtons, this.btnAdd))
         this.lbItems.OnEvent("DoubleClick", (*) => this.EditSelectedItem())
 
         btnManageGrp.OnEvent("Click", (*) => this.ShowGroupManagerPopup())
@@ -379,7 +384,6 @@ class HotstringManager {
     RefreshList(targetIdx := 0) {
         groupSection := this.GetCurrentSection()
 
-        this.lbItems.Delete()
         listData := []
 
         if (this.localData.Has(groupSection)) {
@@ -391,12 +395,14 @@ class HotstringManager {
             }
         }
 
-        if (listData.Length > 0)
-            this.lbItems.Add(listData)
+        SetListBoxItems(this.lbItems, listData, this.HasSelectableGroup()
+            ? "No abbreviations here yet. Click ➕ New."
+            : "No group yet. Create one with ⚙️ Groups.")
 
         if (targetIdx > 0 && targetIdx <= listData.Length) {
             this.lbItems.Choose(targetIdx)
         }
+        UpdateSelectionButtons(this.lbItems, this.selectionButtons, this.btnAdd)
     }
 
     EditSelectedItem() {
@@ -561,7 +567,11 @@ class HotstringManager {
             ResetToDefaults("Hotstrings")
     }
 
+    ; Returns whether the change reached the disk, which is what callers need to
+    ; refresh the list and close the popup. Whether it is also active is kept in
+    ; applyWarning for the feedback that follows.
     SaveSettings(showFeedback := true) {
+        this.applyWarning := ""
         try {
             ConfigWriteHotstringData(this.localData, this.groupOrder)
         } catch Error as err {
@@ -576,22 +586,30 @@ class HotstringManager {
         }
 
         try {
-            LoadHotstrings()
+            failedItems := LoadHotstrings(false)
             BuildEmojiMenu()
         } catch Error as err {
+            this.applyWarning := "⚠️ Saved, but not active until SwiftDeck is reloaded"
             MsgBox("⚠️ The hotstring change was saved, but the running app could not activate it.`n`n"
                 . "Reload SwiftDeck to apply the saved change.`n`nError: " . err.Message,
                 "Apply Failed", 262160)
             return true
         }
+        if (failedItems.Length > 0)
+            this.applyWarning := "⚠️ Saved, but " . failedItems.Length . " hotstring(s) could not be activated: "
+                . FormatShortList(failedItems)
 
         if showFeedback
             this.ShowAutoSaveFeedback()
         return true
     }
 
+    ; Callers pass the success wording. A problem found by the save just made
+    ; replaces it, so the message never calls a hotstring active that is not.
     ShowAutoSaveFeedback(message := "✅ Saved and applied") {
-        ToolTip(message)
-        SetTimer(() => ToolTip(), -2000)
+        if (this.applyWarning != "")
+            ShowFeedbackToolTip(this.applyWarning, 5000)
+        else
+            ShowFeedbackToolTip(message)
     }
 }

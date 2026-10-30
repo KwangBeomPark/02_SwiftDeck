@@ -202,6 +202,12 @@ AssertEqual(StrJoin(["only"]), "only", "Join a single item")
 AssertEqual(StrJoin(["a", "b", "c"]), "a, b, c", "Join with the default separator")
 AssertEqual(StrJoin(["a", "b"], " | "), "a | b", "Join with a custom separator")
 
+AssertEqual(FormatShortList([]), "", "Short list of nothing")
+AssertEqual(FormatShortList(["a", "b"]), "a, b", "Short list under the limit")
+AssertEqual(FormatShortList(["a", "b", "c", "d", "e"]), "a, b, c, d, e", "Short list at the limit")
+AssertEqual(FormatShortList(["a", "b", "c", "d", "e", "f", "g"]), "a, b, c, d, e ... +2 more", "Short list over the limit")
+AssertEqual(FormatShortList(["a", "b", "c"], 2), "a, b ... +1 more", "Short list with a custom limit")
+
 ; --- High-DPI fit ---
 ; Measured design sizes: the settings window is 514x550 and the manual 700x720
 ; in 96-DPI units. Display scaling multiplies those; the work area does not
@@ -232,6 +238,20 @@ AssertEqual(secondary.Y, 320, "Negative-coordinate monitor center Y")
 oversized := CalculateCenteredWindowPosition(2200, 1200, -1920, -200, 0, 840)
 AssertEqual(oversized.X, -1920, "Oversized window clamps to work-area left")
 AssertEqual(oversized.Y, -200, "Oversized window clamps to work-area top")
+
+; ShowCenteredOnMouse must pass the physical size. The 514x550 settings window
+; is 771x825 at 150%; centering it as 514x550 put its bottom 46px off a 1080p
+; work area, which is what hid the Factory Reset row.
+scaled := CalculateCenteredWindowPosition(771, 825, 0, 0, 1920, 1008)
+AssertEqual(scaled.X, 574, "Physical width centers a 150% window")
+AssertEqual(scaled.Y, 91, "Physical height centers a 150% window")
+AssertTrue(scaled.Y + 825 <= 1008, "A 150% window keeps its bottom on-screen")
+logical := CalculateCenteredWindowPosition(514, 550, 0, 0, 1920, 1008)
+AssertTrue(logical.Y + 825 > 1008, "Centering the logical size overflows at 150%")
+
+scaledSecondary := CalculateCenteredWindowPosition(771, 825, -1920, 0, 0, 1008)
+AssertEqual(scaledSecondary.X, -1346, "Physical size centers on a negative-coordinate monitor")
+AssertTrue(scaledSecondary.Y + 825 <= 1008, "Negative-coordinate monitor keeps the bottom on-screen")
 
 ; A hotkey bound with no modifier at all can take the key away from the rest of
 ; Windows. Bare LButton swallows every left click, including the clicks needed to

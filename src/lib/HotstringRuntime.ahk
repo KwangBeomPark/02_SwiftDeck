@@ -3,7 +3,10 @@
 
 ; Runtime globals such as g_registeredHotstrings are initialized in SwiftDeck.ahk.
 
-LoadHotstrings() {
+; Returns the triggers that could not be registered. Startup shows them here;
+; the settings tab passes false and reports them itself, so that its own
+; "saved and applied" message cannot paint over the warning.
+LoadHotstrings(showFailures := true) {
     global g_registeredHotstrings
 
     for hotstringSpec in g_registeredHotstrings {
@@ -11,10 +14,10 @@ LoadHotstrings() {
     }
     g_registeredHotstrings := []
 
-    if !ConfigExists("Hotstrings")
-        return
-
     failedItems := []
+    if !ConfigExists("Hotstrings")
+        return failedItems
+
     hotstringData := ConfigReadHotstringData()
 
     for groupSection in hotstringData.GroupOrder {
@@ -41,16 +44,7 @@ LoadHotstrings() {
         }
     }
 
-    if (failedItems.Length > 0) {
-        failedList := ""
-        maxShow := Min(failedItems.Length, 5)  ; Show up to 5 failed triggers
-        loop maxShow {
-            failedList .= failedItems[A_Index] . ", "
-        }
-        failedList := RTrim(failedList, ", ")
-        if (failedItems.Length > 5)
-            failedList .= " ... +" . (failedItems.Length - 5) . " more"
-        ToolTip("⚠️ Failed hotstrings (" . failedItems.Length . "): " . failedList)
-        SetTimer(() => ToolTip(), -5000)
-    }
+    if (showFailures && failedItems.Length > 0)
+        ShowFeedbackToolTip("⚠️ Failed hotstrings (" . failedItems.Length . "): " . FormatShortList(failedItems), 5000)
+    return failedItems
 }

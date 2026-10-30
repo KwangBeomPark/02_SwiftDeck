@@ -11,6 +11,7 @@
 class KeyRemapManager {
     __New(parentGui := "") {
         this.parentGui := parentGui
+        this.applyWarning := ""
         this.localData := ConfigReadKeyRemaps()
         if (parentGui)
             this.BuildUI(parentGui)
@@ -61,8 +62,11 @@ class KeyRemapManager {
         guiObj.Add("Text", "x" . startX . " y" . (startY + autoSaveOffset) . " w405 Center", "✓ Changes are saved and applied immediately.")
         guiObj.SetFont("s10 c" . THEME_TEXT . " norm", "Segoe UI")
 
+        this.btnAdd := btnAdd
+        this.selectionButtons := [btnEdit, btnDel]
         this.RefreshList()
 
+        this.lbItems.OnEvent("Change", (*) => UpdateSelectionButtons(this.lbItems, this.selectionButtons, this.btnAdd))
         this.lbItems.OnEvent("DoubleClick", (*) => this.EditSelectedItem())
         btnEdit.OnEvent("Click", (*) => this.EditSelectedItem())
         btnDel.OnEvent("Click", (*) => this.DeleteItem())
@@ -166,12 +170,11 @@ class KeyRemapManager {
             suffix := (appConflict != "") ? "   [inactive — used by " . appConflict . "]" : ""
             listData.Push(friendlySrc . "  →  " . friendlyDst . suffix)
         }
-        this.lbItems.Delete()
-        if (listData.Length > 0)
-            this.lbItems.Add(listData)
+        SetListBoxItems(this.lbItems, listData, "No key mappings yet. Click ➕ New.")
         if (targetIdx > 0 && targetIdx <= listData.Length) {
             this.lbItems.Choose(targetIdx)
         }
+        UpdateSelectionButtons(this.lbItems, this.selectionButtons, this.btnAdd)
     }
 
     EditSelectedItem() {
@@ -402,7 +405,11 @@ class KeyRemapManager {
             ResetToDefaults("Key Remaps")
     }
 
+    ; Returns whether the change reached the disk, which is what callers need to
+    ; refresh the list and close the popup. Whether it is also active is kept in
+    ; applyWarning for the feedback that follows.
     SaveSettings(showFeedback := true) {
+        this.applyWarning := ""
         try {
             ConfigWriteKeyRemaps(this.localData)
         } catch Error as err {
@@ -414,22 +421,30 @@ class KeyRemapManager {
         }
 
         try {
-            LoadKeyRemaps()
+            failedItems := LoadKeyRemaps(false)
         } catch Error as err {
+            this.applyWarning := "⚠️ Saved, but not active until SwiftDeck is reloaded"
             MsgBox("⚠️ The key mapping was saved, but the running app could not activate it.`n`n"
                 . "Reload SwiftDeck to apply the saved change.`n`nError: " . err.Message,
                 "Apply Failed", 262160)
             return true
         }
+        if (failedItems.Length > 0)
+            this.applyWarning := "⚠️ Saved, but " . failedItems.Length . " key mapping(s) could not be activated: "
+                . FormatShortList(failedItems)
 
         if showFeedback
             this.ShowAutoSaveFeedback()
         return true
     }
 
+    ; Callers pass the success wording. A problem found by the save just made
+    ; replaces it, so the message never calls a mapping active that is not.
     ShowAutoSaveFeedback(message := "✅ Saved and applied") {
-        ToolTip(message)
-        SetTimer(() => ToolTip(), -2000)
+        if (this.applyWarning != "")
+            ShowFeedbackToolTip(this.applyWarning, 5000)
+        else
+            ShowFeedbackToolTip(message)
     }
 }
 
@@ -441,7 +456,9 @@ HasVal(arr, val) {
     return false
 }
 
-LoadKeyRemaps() {
+; Returns the source keys that could not be registered, shown the same way as
+; LoadHotstrings: here at startup, by the settings tab otherwise.
+LoadKeyRemaps(showFailures := true) {
     global g_registeredKeyRemaps
 
     ; Unregister existing key mappings
@@ -451,8 +468,9 @@ LoadKeyRemaps() {
     }
     g_registeredKeyRemaps.Clear()
 
+    failedItems := []
     if !ConfigExists("KeyRemaps")
-        return
+        return failedItems
 
     ; A settings file written before this was blocked can still hold a remap that
     ; collides with one of SwiftDeck's own shortcuts. Registering it would
@@ -471,9 +489,21 @@ LoadKeyRemaps() {
                     Hotkey(item.Src, RemapGenericHandler.Bind(item.Dst))
                 }
                 g_registeredKeyRemaps[item.Src] := item.Dst
+            } catch {
+                ; A mouse remap registers two hotkeys; if only the first took,
+                ; it is untracked and would never be turned off again.
+                try Hotkey(item.Src, "Off")
+                try Hotkey(item.Src . " Up", "Off")
+                failedName := item.Src
+                try failedName := FormatHotkeyDisplay(item.Src)
+                failedItems.Push(failedName)
             }
         }
     }
+
+    if (showFailures && failedItems.Length > 0)
+        ShowFeedbackToolTip("⚠️ Failed key mappings (" . failedItems.Length . "): " . FormatShortList(failedItems), 5000)
+    return failedItems
 }
 
 IsMouseButton(dst) {

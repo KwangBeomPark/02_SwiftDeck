@@ -29,6 +29,17 @@ StrJoin(items, separator := ", ") {
     return result
 }
 
+; "a, b, c ... +2 more": at most maxShow names, for a one-line warning.
+FormatShortList(items, maxShow := 5) {
+    shown := []
+    loop Min(items.Length, maxShow)
+        shown.Push(items[A_Index])
+    text := StrJoin(shown)
+    if (items.Length > maxShow)
+        text .= " ... +" . (items.Length - maxShow) . " more"
+    return text
+}
+
 ; Normalizes arbitrary user or filesystem text into a Win32 menu label.
 ; Win32 treats "&" as the keyboard-accelerator prefix, so an unescaped folder
 ; named "R&D" renders as "RD" with the D underlined. Line breaks would also break
@@ -610,8 +621,11 @@ GetFittingGuiOptions(logicalWidth, logicalHeight) {
 
 ShowCenteredOnMouse(guiObj, options := "") {
     guiObj.Show("Hide " . options)
-    guiObj.GetPos(,, &gW, &gH)
-    
+    ; Physical size, to match MonitorGetWorkArea. Gui.GetPos divides Width and
+    ; Height by the display scaling, so at 150% a 550px-tall window would be
+    ; centered as 550 while really 825 tall, pushing its bottom off-screen.
+    WinGetPos(,, &gW, &gH, guiObj.Hwnd)
+
     CoordMode("Mouse", "Screen")
     MouseGetPos(&mX, &mY)
     
@@ -646,4 +660,46 @@ UpdateSaveButtonState(buttonCtrl, isDirty) {
     buttonCtrl.Text := isDirty
         ? "● Save && Apply (Unsaved)"
         : "💾 Save && Apply"
+}
+
+; Fills a settings list. An empty list shows one greyed-out hint line instead
+; of a blank white box. The ListBox stays disabled while it shows the hint, so
+; the line can never be selected and taken for an item: every caller indexes
+; its data by the ListBox's Value.
+SetListBoxItems(listBox, items, emptyHint) {
+    listBox.Delete()
+    if (items.Length > 0) {
+        listBox.Enabled := true
+        listBox.Add(items)
+        return
+    }
+    listBox.Add([emptyHint])
+    listBox.Enabled := false
+}
+
+; Settings feedback goes through one clear callback. SetTimer on the same
+; function restarts its countdown, so a warning shown right after a success
+; message is not wiped by the success message's shorter timer; a fresh
+; "() => ToolTip()" each time would start a second, independent timer.
+ShowFeedbackToolTip(message, durationMs := 2000) {
+    ToolTip(message)
+    SetTimer(HideFeedbackToolTip, -durationMs)
+}
+
+HideFeedbackToolTip() {
+    ToolTip()
+}
+
+; Edit, Delete and the move buttons act on the selected item, so they are
+; enabled only while one is selected. A button about to be disabled hands the
+; keyboard focus to fallbackCtrl first, rather than keeping it unusable.
+UpdateSelectionButtons(listBox, buttons, fallbackCtrl) {
+    ; Value alone: the empty-list hint is never selected, and Enabled reads
+    ; false for every control on a tab that is not showing.
+    hasSelection := listBox.Value > 0
+    for btn in buttons {
+        if (!hasSelection && btn.Focused)
+            try fallbackCtrl.Focus()
+        btn.Enabled := hasSelection
+    }
 }

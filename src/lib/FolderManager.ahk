@@ -81,8 +81,11 @@ class FolderManager {
             btnClose.OnEvent("Click", (*) => guiObj.Destroy())
         }
 
+        this.btnAdd := btnAddDir
+        this.selectionButtons := [btnEdit, btnDel, btnUp, btnDown]
         this.RefreshList()
 
+        this.lbItems.OnEvent("Change", (*) => UpdateSelectionButtons(this.lbItems, this.selectionButtons, this.btnAdd))
         this.lbItems.OnEvent("DoubleClick", (*) => this.EditFolder())
         btnAddDir.OnEvent("Click", (*) => this.AddFolder())
         btnEdit.OnEvent("Click", (*) => this.EditFolder())
@@ -111,11 +114,10 @@ class FolderManager {
                 listData.Push(obj.Name)
             }
         }
-        this.lbItems.Delete()
-        if (listData.Length > 0)
-            this.lbItems.Add(listData)
+        SetListBoxItems(this.lbItems, listData, "No folders yet. Click ➕ New.")
         if (targetIdx > 0 && targetIdx <= listData.Length)
             this.lbItems.Choose(targetIdx)
+        UpdateSelectionButtons(this.lbItems, this.selectionButtons, this.btnAdd)
     }
 
     MoveItem(dir) {
@@ -324,7 +326,6 @@ class FolderManager {
     }
 
     ShowAutoSaveFeedback(message := "✅ Saved and applied") {
-        ToolTip(message)
-        SetTimer(() => ToolTip(), -2000)
+        ShowFeedbackToolTip(message)
     }
 }
