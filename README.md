@@ -67,7 +67,7 @@ Either way, do not turn Smart App Control off to work around a block: it is a **
 The installer signature and SHA-256 digest are separate checks. Each new release includes `SHA256SUMS.txt` and `build-manifest.json`:
 
 ```powershell
-Get-FileHash .\App02_SwiftDeck_Setup_v1.4.2.exe -Algorithm SHA256
+Get-FileHash .\App02_SwiftDeck_Setup_v1.4.3.exe -Algorithm SHA256
 ```
 
 The printed hash must match the line for that filename in `SHA256SUMS.txt`. If it does not, delete the file and download it again.

@@ -67,7 +67,7 @@
 서명과 SHA-256은 별도 검사입니다. 새 릴리즈에는 설치 파일 한 개와 SHA256SUMS.txt·build-manifest.json을 함께 게시합니다:
 
 ```powershell
-Get-FileHash .\App02_SwiftDeck_Setup_v1.4.2.exe -Algorithm SHA256
+Get-FileHash .\App02_SwiftDeck_Setup_v1.4.3.exe -Algorithm SHA256
 ```
 
 출력된 해시가 `SHA256SUMS.txt`의 해당 파일 줄과 같아야 합니다. 다르면 파일을 지우고 다시 내려받으세요.

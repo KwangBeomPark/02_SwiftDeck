@@ -1,7 +1,7 @@
 #Requires AutoHotkey v2.0
 #SingleInstance Force
 ;@Ahk2Exe-SetName SwiftDeck
-;@Ahk2Exe-SetVersion 1.4.2.0
+;@Ahk2Exe-SetVersion 1.4.3.0
 ;@Ahk2Exe-SetDescription SwiftDeck - FinOps Automation & HotKey Suite
 ;@Ahk2Exe-SetMainIcon ..\assets\SwiftDeck.ico
 
@@ -10,7 +10,7 @@
 ; =============================================================================
 
 ; [Global] Display version shown in the app UI
-global g_appVersion := "1.4.2"
+global g_appVersion := "1.4.3"
 
 ; [Global] All active settings live beside the executable; Roaming originals stay untouched.
 global g_targetFolder := A_ScriptDir . "\UserSetting\"

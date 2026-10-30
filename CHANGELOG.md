@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.4.3 — 2026-10-30
 
 ### 설정 창 크기 및 UX
 
