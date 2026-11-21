@@ -184,8 +184,14 @@ InitializeConfig(fileName, defaultText) {
     }
 
     try {
-        ConfigWriteTextFileSafely(targetFile, defaultText, "UTF-16")
+        ; Create only: a file a sync client brings back meanwhile is kept.
+        ConfigWriteTextFileSafely(targetFile, defaultText, "UTF-16", true)
     } catch Error as err {
+        ; Only "the file already exists" means a sync client won the race and
+        ; its file is kept; any other failure is still reported.
+        arrived := FileExist(targetFile)
+        if (err is OSError && (err.Number == 80 || err.Number == 183) && arrived != "" && !InStr(arrived, "D"))
+            return
         MsgBox("⚠️ Cannot create file in the target drive.`n`nPath: " . targetFile . "`n`nError: " . err.Message, "Error", 262160)
     }
 }
@@ -381,46 +387,20 @@ ConfigEnsureDir(dirPath) {
         DirCreate(dirPath)
 }
 
-ConfigMakeTempPath(targetPath, tag := "tmp") {
-    SplitPath(targetPath, &fileName, &dirPath)
-    loop 50 {
-        tempPath := dirPath . "\" . fileName . "." . tag . "." . A_Now . "." . A_TickCount . "." . A_Index
-        if !FileExist(tempPath)
-            return tempPath
-    }
-    throw Error("Cannot create a temporary file path for: " . targetPath)
-}
-
-ConfigWriteTextFileSafely(targetPath, content, encoding := "UTF-16") {
+ConfigWriteTextFileSafely(targetPath, content, encoding := "UTF-16", createOnly := false) {
     loop 3 {
         try {
-            SettingsWriteText(targetPath, content, encoding)
+            SettingsWriteText(targetPath, content, encoding, createOnly)
             return
         } catch Error as err {
-            if A_Index == 3
+            ; A retry would write into the place the kept file was taken from,
+            ; or over a file that arrived meanwhile: report those instead.
+            if (A_Index == 3 || err.HasOwnProp("KeptBackup") || (createOnly && FileExist(targetPath)))
                 throw err
             Sleep(100 * A_Index)
         }
     }
 }
-ConfigCreateRollbackCopy(targetPath) {
-    if !FileExist(targetPath)
-        return ""
-    rollbackPath := ConfigMakeTempPath(targetPath, "rollback")
-    FileCopy(targetPath, rollbackPath, true)
-    return rollbackPath
-}
-
-ConfigRestoreRollbackCopy(targetPath, rollbackPath) {
-    if (rollbackPath != "" && FileExist(rollbackPath))
-        try FileCopy(rollbackPath, targetPath, true)
-}
-
-ConfigDeleteFileQuietly(path) {
-    if (path != "" && FileExist(path))
-        try FileDelete(path)
-}
-
 ConfigDeleteDirQuietly(path) {
     if (path != "" && DirExist(path))
         try DirDelete(path, true)
@@ -796,25 +776,19 @@ ConfigWritePromptData(promptData) {
             throw Error("Prompt slot " . num . ": " . limitWarning)
     }
 
-    ; And roll the whole file back if a write fails part-way for any other
-    ; reason — a locked or cloud-synced file, most likely.
-    configPath := GetConfigPath("Prompts")
-    rollbackPath := ConfigCreateRollbackCopy(configPath)
-    try {
-        loop 10 {
-            num := A_Index - 1
-            items := (promptData[num].Length > 0) ? promptData[num] : []
-            ConfigWriteSection("Prompts", "Numpad" . num, ConfigBuildPromptSectionText(items))
-        }
-        ; Recorded after the slots: a reader that sees this marker knows every
-        ; slot above is in the new encoding.
-        ConfigWriteValue("Prompts", "Meta", "PromptEncoding", ConfigGetPromptEncodingVersion())
-    } catch Error as err {
-        ConfigRestoreRollbackCopy(configPath, rollbackPath)
-        throw err
-    } finally {
-        ConfigDeleteFileQuietly(rollbackPath)
+    ; All slots and the marker go in one atomic write (SettingsWriteIniValues),
+    ; so a locked or cloud-synced file refuses the save whole instead of keeping
+    ; some slots rewritten.
+    changes := []
+    loop 10 {
+        num := A_Index - 1
+        items := (promptData[num].Length > 0) ? promptData[num] : []
+        changes.Push({ Section: "Numpad" . num, SectionText: ConfigBuildPromptSectionText(items) })
     }
+    ; Written with the slots: a reader that sees this marker knows every slot
+    ; is in the new encoding.
+    changes.Push({ Section: "Meta", Key: "PromptEncoding", Value: ConfigGetPromptEncodingVersion() })
+    SettingsWriteIniValues(GetConfigPath("Prompts"), changes)
 }
 
 ; Optional names for the ten slots ("1=Outlook"). They live in their own
@@ -1012,68 +986,53 @@ ConfigWriteHotstringData(localData, groupOrder) {
         }
     }
 
-    configPath := GetConfigPath("Hotstrings")
-    fullRollbackPath := ConfigCreateRollbackCopy(configPath)
+    ; Every section is replaced in one atomic write (SettingsWriteIniValues), so
+    ; a failure cannot leave the old groups deleted and the new ones unwritten.
+    changes := [{ ClearSectionsExcept: ["Meta"] }]
+    changes.Push({ Section: "Meta", Key: "SchemaVersion", Value: "4" })
 
-    try {
-        sections := ConfigReadSections("Hotstrings")
-        if (sections != "") {
-            loop parse, sections, "`n", "`r" {
-                sectionName := Trim(A_LoopField)
-                if (sectionName != "" && sectionName != "Meta")
-                    ConfigDeleteSection("Hotstrings", sectionName)
-            }
-        }
+    groupDefs := []
+    for groupSection in groupOrder {
+        if !localData.Has(groupSection)
+            continue
 
-        ConfigWriteValue("Hotstrings", "Meta", "SchemaVersion", "4")
+        groupType := HotstringGetRuntimeGroupType(groupSection)
+        groupName := HotstringGetRuntimeGroupName(groupSection)
+        if (groupName == "")
+            groupName := "Default"
 
-        groupDefs := []
-        for groupSection in groupOrder {
-            if !localData.Has(groupSection)
+        itemCount := 0
+        itemContent := ""
+        for item in localData[groupSection] {
+            triggerText := Trim(item.Key)
+            replacementText := Trim(item.Val)
+            if (triggerText == "" || replacementText == "")
                 continue
-
-            groupType := HotstringGetRuntimeGroupType(groupSection)
-            groupName := HotstringGetRuntimeGroupName(groupSection)
-            if (groupName == "")
-                groupName := "Default"
-
-            itemCount := 0
-            itemContent := ""
-            for item in localData[groupSection] {
-                triggerText := Trim(item.Key)
-                replacementText := Trim(item.Val)
-                if (triggerText == "" || replacementText == "")
-                    continue
-                itemCount++
-                itemNo := Format("{:03}", itemCount)
-                itemContent .= "Item" . itemNo . "Key=" . HotstringEncodeIniValue(triggerText) . "`n"
-                itemContent .= "Item" . itemNo . "Val=" . HotstringEncodeIniValue(replacementText) . "`n"
-                triggerMode := HotstringGetMode(item)
-                if (triggerMode != "")
-                    itemContent .= "Item" . itemNo . "Mode=" . triggerMode . "`n"
-            }
-            groupDefs.Push({ Type: groupType, Name: groupName, ItemContent: "ItemCount=" . itemCount . "`n" . itemContent })
+            itemCount++
+            itemNo := Format("{:03}", itemCount)
+            itemContent .= "Item" . itemNo . "Key=" . HotstringEncodeIniValue(triggerText) . "`n"
+            itemContent .= "Item" . itemNo . "Val=" . HotstringEncodeIniValue(replacementText) . "`n"
+            triggerMode := HotstringGetMode(item)
+            if (triggerMode != "")
+                itemContent .= "Item" . itemNo . "Mode=" . triggerMode . "`n"
         }
-
-        if (groupDefs.Length == 0)
-            groupDefs.Push({ Type: "Space", Name: "Default", ItemContent: "ItemCount=0`n" })
-
-        groupsContent := "Count=" . groupDefs.Length . "`n"
-        for idx, groupDef in groupDefs {
-            groupNo := Format("{:03}", idx)
-            groupId := "Group" . groupNo
-            groupsContent .= "Group" . groupNo . "Id=" . groupId . "`n"
-            groupsContent .= "Group" . groupNo . "Type=" . groupDef.Type . "`n"
-            groupsContent .= "Group" . groupNo . "Name=" . HotstringEncodeIniValue(groupDef.Name) . "`n"
-            ConfigWriteSection("Hotstrings", groupId, groupDef.ItemContent)
-        }
-        ConfigWriteSection("Hotstrings", "Groups", groupsContent)
-    } catch Error as err {
-        ConfigRestoreRollbackCopy(configPath, fullRollbackPath)
-        throw err
-    } finally {
-        ConfigDeleteFileQuietly(fullRollbackPath)
+        groupDefs.Push({ Type: groupType, Name: groupName, ItemContent: "ItemCount=" . itemCount . "`n" . itemContent })
     }
+
+    if (groupDefs.Length == 0)
+        groupDefs.Push({ Type: "Space", Name: "Default", ItemContent: "ItemCount=0`n" })
+
+    groupsContent := "Count=" . groupDefs.Length . "`n"
+    for idx, groupDef in groupDefs {
+        groupNo := Format("{:03}", idx)
+        groupId := "Group" . groupNo
+        groupsContent .= "Group" . groupNo . "Id=" . groupId . "`n"
+        groupsContent .= "Group" . groupNo . "Type=" . groupDef.Type . "`n"
+        groupsContent .= "Group" . groupNo . "Name=" . HotstringEncodeIniValue(groupDef.Name) . "`n"
+        changes.Push({ Section: groupId, SectionText: groupDef.ItemContent })
+    }
+    changes.Push({ Section: "Groups", SectionText: groupsContent })
+    SettingsWriteIniValues(GetConfigPath("Hotstrings"), changes)
 }
 
 ConfigReadIntegerValue(configName, section, key, defaultValue := 0) {

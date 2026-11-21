@@ -121,6 +121,11 @@ MigrateIniEncoding() {
                 content := FileRead(path, sourceEncoding)
                 ConfigWriteTextFileSafely(path, content, "UTF-16")
             }
+        } catch Error as err {
+            ; A file left only under a backup name must be reported, so the
+            ; startup warning says where the settings are.
+            if err.HasOwnProp("KeptBackup")
+                throw err
         }
     }
 }
