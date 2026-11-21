@@ -135,6 +135,17 @@ for entry in marks {
 }
 AssertTrue(foundCircle, "Marks still offer built-in symbols with no hotstring")
 
+marksDefaults := defaults.Data["Group_Space_Marks_Checks"]
+middleDot := marksDefaults[marksDefaults.Length]
+AssertEqual(middleDot.Key . " " . Format("U+{:04X}", Ord(middleDot.Val)) . " " . HotstringGetMode(middleDot),
+    "m.m U+00B7 InWord", "The middle dot is typed inside a word")
+middleDotTrigger := ""
+for entry in marks {
+    if (entry.Text == "·")
+        middleDotTrigger .= "[" . entry.Trigger . "]"
+}
+AssertEqual(middleDotTrigger, "[m.m]", "The menu lists the middle dot once, with its trigger")
+
 ; --- Files written before the regrouping ---
 legacy := HotstringFixture([
     { Name: "Bullets_Indicators", Items: [["z.z", "▣"], ["x.x", "※"], ["v.v", "✓"]] },

@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+### 중간점과 단어에 붙여 쓰는 Hotstring
+
+- 중간점 `·`을 `m.m`으로 입력할 수 있습니다. 단어 바로 뒤에서도 바뀌고 Space는 남지 않아, `서울m.m` + Space → `서울·`이 되고 이어서 `부산`을 치면 `서울·부산`입니다. 앞을 띄우면 `A m.m` + Space → `A ·`입니다.
+- Hotstring 편집 창에 `Also expand right after other letters (in-word)` 체크박스를 추가했습니다. 켠 항목은 다른 글자 바로 뒤에서도 바뀌고, 입력을 끝낸 글자(Space·Enter·Tab·구두점)를 지웁니다. 목록에는 `(in-word)`로 표시됩니다. 트리거 뒤에 그런 글자가 와야 바뀌므로 `team.mp4` 같은 파일 이름 중간에서는 바뀌지 않습니다.
+- 이 설정은 `ItemNNNMode=InWord`로 저장되고, 켜지 않은 항목은 파일 내용이 그대로입니다. 이전 버전에서 열면 일반 항목처럼 동작하고, 이전 버전에서 저장하면 이 설정이 지워집니다.
+- `m.m`은 새 설치·Hotstrings 초기화 때만 기본값에 들어갑니다. 이미 쓰던 설정에는 Hotstrings → Marks_Checks에서 `m.m` → `·`을 추가하고 체크박스를 켜면 됩니다.
+
 ## 1.4.3 — 2026-10-30
 
 ### 설정 창 크기 및 UX

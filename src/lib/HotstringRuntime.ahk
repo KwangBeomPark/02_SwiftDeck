@@ -20,27 +20,14 @@ LoadHotstrings(showFailures := true) {
 
     hotstringData := ConfigReadHotstringData()
 
-    for groupSection in hotstringData.GroupOrder {
-        if !hotstringData.Data.Has(groupSection)
-            continue
-        if (HotstringGetRuntimeGroupType(groupSection) != "Space")
-            continue
-
-        for item in hotstringData.Data[groupSection] {
-            triggerText := Trim(item.Key)
-            replacementText := Trim(item.Val)
-            if (triggerText == "" || replacementText == "")
-                continue
-
-            ; No * option: AutoHotkey checks the trigger only after an ending character.
-            hotstringSpec := ":T:" . triggerText
-            try {
-                Hotstring(hotstringSpec, replacementText)
-                Hotstring(hotstringSpec, , "On")
-                g_registeredHotstrings.Push(hotstringSpec)
-            } catch {
-                failedItems.Push(triggerText)
-            }
+    ; No * option: AutoHotkey checks the trigger only after an ending character.
+    for entry in HotstringBuildRuntimePlan(hotstringData) {
+        try {
+            Hotstring(entry.Spec, entry.Replacement)
+            Hotstring(entry.Spec, , "On")
+            g_registeredHotstrings.Push(entry.Spec)
+        } catch {
+            failedItems.Push(entry.Trigger)
         }
     }
 

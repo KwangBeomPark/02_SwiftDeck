@@ -385,13 +385,16 @@ class HotstringManager {
         groupSection := this.GetCurrentSection()
 
         listData := []
+        isKeyboardGroup := HotstringGetRuntimeGroupType(groupSection) == "Space"
 
         if (this.localData.Has(groupSection)) {
             for idx, item in this.localData[groupSection] {
                 displayVal := StrReplace(item.Val, "`n", " ↵ ")
                 if (StrLen(displayVal) > 25)
                     displayVal := SubStr(displayVal, 1, 25) . "…"
-                listData.Push("[ " . item.Key . " ]  ▶  " . displayVal)
+                ; After the trigger, so a long replacement cannot push it out of view.
+                inWordBadge := (isKeyboardGroup && HotstringIsInWord(item)) ? "  (in-word)" : ""
+                listData.Push("[ " . item.Key . " ]" . inWordBadge . "  ▶  " . displayVal)
             }
         }
 
@@ -448,9 +451,11 @@ class HotstringManager {
 
         existingKey := ""
         existingVal := ""
+        existingMode := ""
         if (isEdit && this.localData.Has(groupSection) && editIdx > 0 && editIdx <= this.localData[groupSection].Length) {
             existingKey := this.localData[groupSection][editIdx].Key
             existingVal := this.localData[groupSection][editIdx].Val
+            existingMode := HotstringGetMode(this.localData[groupSection][editIdx])
         }
 
         popup.Add("GroupBox", "x15 y10 w400 h90 cBlack", "③ Abbreviation (Trigger)")
@@ -461,13 +466,27 @@ class HotstringManager {
         popup.Add("Text", "x30 y135 w370 c666666", "The abbreviation will be replaced with this text:")
         edtVal := popup.Add("Edit", "x30 y158 w370 h60", existingVal)
 
+        ; Menu-only groups are never registered as typed hotstrings, so the
+        ; option would have no effect there.
+        isKeyboardGroup := HotstringGetRuntimeGroupType(groupSection) == "Space"
+        chkInWord := popup.Add("Checkbox", "x20 y244 w395 h24"
+            . (existingMode = "InWord" ? " Checked" : "") . (isKeyboardGroup ? "" : " Disabled"),
+            "Also expand right after other letters (in-word)")
+        popup.SetFont("s9 c666666", "Segoe UI")
+        txtInWord := popup.Add("Text", "x38 y270 w377",
+            "e.g. Seoulm.m + Space → Seoul·`nThe Space, Enter or punctuation that ends it is not typed.")
+        popup.SetFont("s10 cBlack", "Segoe UI")
+        ; The buttons follow the note, so larger text cannot run into them.
+        txtInWord.GetPos(, &noteY, , &noteH)
+        buttonY := Max(312, noteY + noteH + 12)
+
         ; Action buttons
         popup.SetFont("s10 cWhite bold", "Segoe UI")
-        btnConfirm := popup.Add("Button", "x215 y250 w200 h35", isEdit ? "💾 Save Changes" : "➕ Add Hotstring")
+        btnConfirm := popup.Add("Button", "x215 y" . buttonY . " w200 h35", isEdit ? "💾 Save Changes" : "➕ Add Hotstring")
         popup.SetFont("s10 cBlack norm", "Segoe UI")
         btnConfirm.OnEvent("Click", (*) => OnConfirm())
 
-        btnCancel := popup.Add("Button", "x15 y250 w190 h35", "Cancel")
+        btnCancel := popup.Add("Button", "x15 y" . buttonY . " w190 h35", "Cancel")
         btnCancel.OnEvent("Click", (*) => CleanUpAndClose())
 
         OnConfirm() {
@@ -518,11 +537,15 @@ class HotstringManager {
             if (!this.localData.Has(groupSection))
                 this.localData[groupSection] := []
 
+            ; Unticking clears in-word; a mode this version does not know is
+            ; left as it was, since the box cannot show it.
+            triggerMode := chkInWord.Value ? "InWord" : (existingMode = "InWord" ? "" : existingMode)
             if (isEdit) {
                 this.localData[groupSection][editIdx].Key := triggerText
                 this.localData[groupSection][editIdx].Val := replacementText
+                this.localData[groupSection][editIdx].Mode := triggerMode
             } else {
-                this.localData[groupSection].Push({ Key: triggerText, Val: replacementText })
+                this.localData[groupSection].Push({ Key: triggerText, Val: replacementText, Mode: triggerMode })
             }
 
             if !this.SaveSettings(false)
@@ -532,7 +555,7 @@ class HotstringManager {
             this.ShowAutoSaveFeedback(isEdit ? "✅ Hotstring saved and applied" : "✅ Hotstring added and applied")
         }
 
-        ShowCenteredOnMouse(popup, "w430 h300")
+        ShowCenteredOnMouse(popup, "w430 h" . (buttonY + 50))
     }
 
     DeleteItem() {

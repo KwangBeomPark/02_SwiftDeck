@@ -923,8 +923,9 @@ ConfigReadHotstringDataV4() {
             itemNo := Format("{:03}", A_Index)
             triggerText := HotstringDecodeIniValue(ConfigReadValue("Hotstrings", groupId, "Item" . itemNo . "Key", ""))
             replacementText := HotstringDecodeIniValue(ConfigReadValue("Hotstrings", groupId, "Item" . itemNo . "Val", ""))
+            triggerMode := HotstringNormalizeMode(ConfigReadValue("Hotstrings", groupId, "Item" . itemNo . "Mode", ""))
             if (triggerText != "" && replacementText != "") {
-                localData[groupSection].Push({ Key: triggerText, Val: replacementText })
+                localData[groupSection].Push({ Key: triggerText, Val: replacementText, Mode: triggerMode })
             }
         }
     }
@@ -1047,6 +1048,9 @@ ConfigWriteHotstringData(localData, groupOrder) {
                 itemNo := Format("{:03}", itemCount)
                 itemContent .= "Item" . itemNo . "Key=" . HotstringEncodeIniValue(triggerText) . "`n"
                 itemContent .= "Item" . itemNo . "Val=" . HotstringEncodeIniValue(replacementText) . "`n"
+                triggerMode := HotstringGetMode(item)
+                if (triggerMode != "")
+                    itemContent .= "Item" . itemNo . "Mode=" . triggerMode . "`n"
             }
             groupDefs.Push({ Type: groupType, Name: groupName, ItemContent: "ItemCount=" . itemCount . "`n" . itemContent })
         }
@@ -1093,6 +1097,66 @@ HotstringMapLegacySection(sectionName) {
     if (sectionName == "AutoReplace" || sectionName == "SpaceReplace")
         return "Group_Space_Default"
     return ""
+}
+
+; An item's trigger mode is stored as ItemNNNMode, and only when it is not the
+; plain default. A mode this version does not know is kept as written so that
+; saving here does not drop what a newer version set, but it registers plain.
+HotstringNormalizeMode(mode) {
+    mode := Trim(mode)
+    return RegExMatch(mode, "^[A-Za-z][A-Za-z0-9]{0,31}$") ? mode : ""
+}
+
+; Items from a file written before modes existed, or from the legacy reader,
+; have no Mode property and keep the plain behavior.
+HotstringGetMode(item) {
+    return item.HasOwnProp("Mode") ? HotstringNormalizeMode(item.Mode) : ""
+}
+
+HotstringIsInWord(item) {
+    return HotstringGetMode(item) = "InWord"
+}
+
+; The AutoHotkey options an item registers with. A plain item fires only when
+; the abbreviation starts a word, and keeps the ending character. An in-word
+; item ("?O") also fires right after other letters and drops the ending
+; character, so "Seoulm.m" + Space gives "Seoul·". It still waits for that
+; ending character: "*" would fire at once inside text such as "team.mp4".
+; AutoHotkey tells hotstrings apart by their text and the "?" option, and a
+; re-registration keeps any option it leaves out, so a later mode that also
+; uses "?" must switch "O" off explicitly ("O0").
+HotstringBuildRuntimeSpec(item) {
+    return (HotstringIsInWord(item) ? ":T?O:" : ":T:") . Trim(item.Key)
+}
+
+; What LoadHotstrings registers, in order: every item of a keyboard (Space)
+; group. A trigger that repeats replaces the earlier entry, as re-registering
+; the same plain trigger always did; otherwise a plain and an in-word item for
+; one trigger would both stay active, since AutoHotkey keeps them apart.
+HotstringBuildRuntimePlan(hotstringData) {
+    plan := []
+    planIndex := Map()
+    planIndex.CaseSense := false  ; hotstring triggers ignore case
+    for groupSection in hotstringData.GroupOrder {
+        if !hotstringData.Data.Has(groupSection)
+            continue
+        if (HotstringGetRuntimeGroupType(groupSection) != "Space")
+            continue
+        for item in hotstringData.Data[groupSection] {
+            triggerText := Trim(item.Key)
+            replacementText := Trim(item.Val)
+            if (triggerText == "" || replacementText == "")
+                continue
+            entry := { Trigger: triggerText, Spec: HotstringBuildRuntimeSpec(item), Replacement: replacementText }
+            if planIndex.Has(triggerText) {
+                plan[planIndex[triggerText]] := entry
+            } else {
+                plan.Push(entry)
+                planIndex[triggerText] := plan.Length
+            }
+        }
+    }
+    return plan
 }
 
 HotstringMakeRuntimeSection(groupType, groupName) {
@@ -1323,7 +1387,7 @@ GetDefaultHotstringData() {
     . "Item005Key=d.d`n"
     . "Item005Val=Δ`n`n"
     . "[Group003]`n"
-    . "ItemCount=8`n"
+    . "ItemCount=9`n"
     . "Item001Key=x.x`n"
     . "Item001Val=※`n"
     . "Item002Key=***.`n"
@@ -1339,7 +1403,10 @@ GetDefaultHotstringData() {
     . "Item007Key=v.v`n"
     . "Item007Val=✓`n"
     . "Item008Key=q.q`n"
-    . "Item008Val=☑`n`n"
+    . "Item008Val=☑`n"
+    . "Item009Key=m.m`n"
+    . "Item009Val=·`n"
+    . "Item009Mode=InWord`n`n"
     . "[Group004]`n"
     . "ItemCount=10`n"
     . "Item001Key=1..`n"

@@ -200,6 +200,43 @@ Run_() {
     Check(reread.GroupOrder.Length == 1 && reread.GroupOrder[1] == quotedGroup,
         "Hotstrings: the quoted group keeps its place in the order")
 
+    ; A trigger mode is stored only when it is not plain. One this version does
+    ; not know survives a save here but registers plain; a malformed one is dropped.
+    Fresh()
+    modeGroup := "Group_Space_Modes"
+    ConfigWriteHotstringData(Map(modeGroup, [
+        { Key: "m.m", Val: "·", Mode: "InWord" },
+        { Key: "x.x", Val: "※" },
+        { Key: "f.f", Val: "F", Mode: "Instant" },
+        { Key: "b.b", Val: "B", Mode: "bad mode!" }
+    ]), [modeGroup])
+    modeItems := ConfigReadHotstringData().Data[modeGroup]
+    gotModes := ""
+    for item in modeItems
+        gotModes .= "[" . HotstringGetMode(item) . "]"
+    Check(gotModes == "[InWord][][Instant][]", "Hotstrings: trigger modes round-trip (" . gotModes . ")")
+    Check(ConfigReadValue("Hotstrings", "Group001", "Item002Mode", "<none>") == "<none>",
+        "Hotstrings: a plain item writes no Mode line")
+    Check(HotstringBuildRuntimeSpec(modeItems[1]) == ":T?O:m.m", "Hotstrings: in-word registers with ?O")
+    Check(HotstringBuildRuntimeSpec(modeItems[2]) == ":T:x.x", "Hotstrings: a plain item registers as before")
+    Check(HotstringBuildRuntimeSpec(modeItems[3]) == ":T:f.f", "Hotstrings: an unknown mode registers plain")
+    Check(HotstringBuildRuntimeSpec({ Key: " v.v ", Val: "✓" }) == ":T:v.v",
+        "Hotstrings: an item from an older file has no mode and registers plain")
+
+    ; A hand-edited file can repeat a trigger with another mode. Only the later
+    ; one may be registered, or AutoHotkey would keep both active.
+    plan := HotstringBuildRuntimePlan({
+        Data: Map(
+            "Group_Space_A", [{ Key: "m.m", Val: "A" }, { Key: "x.x", Val: "※" }],
+            "Group_Menu_M", [{ Key: "q.q", Val: "☑", Mode: "InWord" }],
+            "Group_Space_B", [{ Key: "M.M", Val: "B", Mode: "InWord" }]),
+        GroupOrder: ["Group_Space_A", "Group_Menu_M", "Group_Space_B"] })
+    planText := ""
+    for entry in plan
+        planText .= "[" . entry.Spec . "=" . entry.Replacement . "]"
+    Check(planText == "[:T?O:M.M=B][:T:x.x=※]",
+        "Hotstrings: a repeated trigger replaces the earlier one; menu groups are not registered (" . planText . ")")
+
     ; ---------- Replacement text that is too large to store ----------
     Fresh()
     Log("")
