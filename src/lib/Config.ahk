@@ -2,6 +2,9 @@
 #Include Utils.ahk
 #Include ..\SettingsManager.ahk
 ; NOTE: Global variables (g_targetFolder, g_filePath_*) are declared in SwiftDeck.ahk.
+
+; Config name -> file read instead, set only while CatalogRead runs.
+global g_configPathOverride := ""
 ; =============================================================================
 ; --- Config File Initialization & Management ---
 ; =============================================================================
@@ -488,6 +491,11 @@ ResetToDefaults(target := "All") {
 ; SECTION: Central Config Gateway
 ; =============================================================================
 GetConfigPath(configName) {
+    global g_configPathOverride
+    ; Set only while CatalogRead runs under Critical, so the same readers can
+    ; read a catalog file and nothing else ever sees the redirect.
+    if (g_configPathOverride is Map && g_configPathOverride.Has(configName))
+        return g_configPathOverride[configName]
     return ConfigGetManagedFile(configName).Path
 }
 
@@ -763,7 +771,19 @@ ConfigCheckPromptSlotLimit(items) {
     return ""
 }
 
-ConfigWritePromptData(promptData) {
+; slotNames, when given (a catalog switch), replaces [SlotNames] in the same write.
+ConfigWritePromptData(promptData, slotNames := "") {
+    ; All slots and the marker go in one atomic write (SettingsWriteIniValues),
+    ; so a locked or cloud-synced file refuses the save whole instead of keeping
+    ; some slots rewritten.
+    changes := ConfigBuildPromptChanges(promptData)
+    if (slotNames is Map)
+        changes.Push({ Section: "SlotNames", SectionText: ConfigBuildSlotNamesText(slotNames) })
+    SettingsWriteIniValues(GetConfigPath("Prompts"), changes)
+}
+
+; The changes that store promptData, shared by the prompt save and catalog files.
+ConfigBuildPromptChanges(promptData) {
     ; Validate every slot before writing any of them. Failing half-way used to
     ; leave slots already converted to the new encoding while the marker — written
     ; last — was still missing, so the next read applied the legacy rule and
@@ -776,9 +796,6 @@ ConfigWritePromptData(promptData) {
             throw Error("Prompt slot " . num . ": " . limitWarning)
     }
 
-    ; All slots and the marker go in one atomic write (SettingsWriteIniValues),
-    ; so a locked or cloud-synced file refuses the save whole instead of keeping
-    ; some slots rewritten.
     changes := []
     loop 10 {
         num := A_Index - 1
@@ -788,7 +805,18 @@ ConfigWritePromptData(promptData) {
     ; Written with the slots: a reader that sees this marker knows every slot
     ; is in the new encoding.
     changes.Push({ Section: "Meta", Key: "PromptEncoding", Value: ConfigGetPromptEncodingVersion() })
-    SettingsWriteIniValues(GetConfigPath("Prompts"), changes)
+    return changes
+}
+
+ConfigBuildSlotNamesText(names) {
+    content := ""
+    loop 10 {
+        num := A_Index - 1
+        name := names.Has(num) ? ConfigNormalizePromptSlotName(names[num]) : ""
+        if (name != "")
+            content .= num . "=" . name . "`n"
+    }
+    return content
 }
 
 ; Optional names for the ten slots ("1=Outlook"). They live in their own
@@ -822,14 +850,8 @@ ConfigNormalizePromptSlotName(name) {
 ConfigWritePromptSlotName(slotNum, name) {
     names := ConfigReadPromptSlotNames()
     names[slotNum] := ConfigNormalizePromptSlotName(name)
-    content := ""
-    loop 10 {
-        num := A_Index - 1
-        if (names[num] != "")
-            content .= num . "=" . names[num] . "`n"
-    }
     ; Empty text deletes the section rather than leaving an empty header.
-    ConfigWriteSection("Prompts", "SlotNames", content)
+    ConfigWriteSection("Prompts", "SlotNames", ConfigBuildSlotNamesText(names))
 }
 
 ; The measured point where storage stops working: 32,767 encoded characters read
@@ -974,6 +996,17 @@ ConfigReadHotstringDataLegacy() {
 }
 
 ConfigWriteHotstringData(localData, groupOrder) {
+    ; Every section is replaced in one atomic write (SettingsWriteIniValues), so
+    ; a failure cannot leave the old groups deleted and the new ones unwritten.
+    changes := [{ ClearSectionsExcept: ["Meta"] }]
+    for change in ConfigBuildHotstringChanges(localData, groupOrder)
+        changes.Push(change)
+    SettingsWriteIniValues(GetConfigPath("Hotstrings"), changes)
+}
+
+; The sections that store the groups, shared by the hotstring save and catalog
+; files. Sections the data no longer holds are the caller's to clear.
+ConfigBuildHotstringChanges(localData, groupOrder) {
     ; Check every item before the file is touched, so an over-long entry is
     ; refused outright instead of being written and read back mangled.
     for groupSection in groupOrder {
@@ -986,10 +1019,7 @@ ConfigWriteHotstringData(localData, groupOrder) {
         }
     }
 
-    ; Every section is replaced in one atomic write (SettingsWriteIniValues), so
-    ; a failure cannot leave the old groups deleted and the new ones unwritten.
-    changes := [{ ClearSectionsExcept: ["Meta"] }]
-    changes.Push({ Section: "Meta", Key: "SchemaVersion", Value: "4" })
+    changes := [{ Section: "Meta", Key: "SchemaVersion", Value: "4" }]
 
     groupDefs := []
     for groupSection in groupOrder {
@@ -1032,7 +1062,7 @@ ConfigWriteHotstringData(localData, groupOrder) {
         changes.Push({ Section: groupId, SectionText: groupDef.ItemContent })
     }
     changes.Push({ Section: "Groups", SectionText: groupsContent })
-    SettingsWriteIniValues(GetConfigPath("Hotstrings"), changes)
+    return changes
 }
 
 ConfigReadIntegerValue(configName, section, key, defaultValue := 0) {

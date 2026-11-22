@@ -7,6 +7,7 @@
 #Include PreferencesManager.ahk
 #Include AppInfo.ahk
 #Include Manual.ahk
+#Include CatalogManager.ahk
 ; Runtime global g_appVersion is initialized in SwiftDeck.ahk before this module is included.
 
 ; =================================================================================
@@ -46,6 +47,9 @@ class DashboardManager {
 
         ; Add top-right global actions. Update stays hidden until a newer release is detected.
         this.hGui.SetFont("s9 cCCCCCC norm", "Segoe UI")
+        ; A window of its own: a sixth tab would wrap the tab strip to two rows.
+        btnGlobalCatalog := this.hGui.Add("Button", "x225 y14 w80 h28", "📚 Catalog")
+        btnGlobalCatalog.OnEvent("Click", (*) => CatalogManager.Show(this.hGui.Hwnd, ObjBindMethod(this, "OnCatalogChanged")))
         btnGlobalManual := this.hGui.Add("Button", "x310 y14 w80 h28", "📘 Manual")
         btnGlobalManual.OnEvent("Click", (*) => OpenAppManual("", this.hGui.Hwnd))
 
@@ -151,6 +155,21 @@ class DashboardManager {
         for manager in [this.folderMgr, this.promptMgr, this.hotstringMgr, this.keyRemapMgr] {
             try manager.ReloadFromDisk()
         }
+    }
+
+    ; A catalog added to or replaced the prompts and hotstrings on disk.
+    OnCatalogChanged() {
+        this.ReloadTabsFromDisk()
+        ; The Hotstrings tab builds its group list once, and a catalog can add
+        ; or remove groups.
+        try {
+            hotstrings := this.hotstringMgr
+            previous := hotstrings.cbGroup.Text
+            hotstrings.UpdateGroupsDdl()
+            if (previous != "")
+                try hotstrings.cbGroup.Choose(previous)
+        }
+        this.OnTabChange()
     }
 
     RefreshUpdateIndicator() {
