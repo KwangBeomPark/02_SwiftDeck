@@ -89,11 +89,15 @@ BuildPromptMenu() {
 }
 
 ShowPromptMenu(*) {
+    if PromptSequenceBusy()
+        return
     BuildPromptMenu()
     g_promptMenu.Show()
 }
 
 _ExecutePromptFromMenu(groupNum, itemIdx, *) {
+    if PromptSequenceBusy()
+        return
     promptData := ConfigReadPromptData()
     if !promptData.Has(groupNum)
         return
@@ -109,7 +113,7 @@ _ExecutePromptFromMenu(groupNum, itemIdx, *) {
     if (HasSpecialKeys(msg)) {
         ExecutePromptSequence(msg)
     } else {
-        expanded := ExpandPromptDynamicTokens(msg, GetCurrentClipboardText())
+        expanded := ExpandPromptDynamicTokens(msg, GetUserClipboardText())
         if (expanded == "") {
             ShowFeedbackToolTip("ℹ️ Nothing to paste (clipboard has no text)", 1500)
             return

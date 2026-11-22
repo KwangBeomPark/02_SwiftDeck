@@ -18,6 +18,8 @@ class PromptManager {
     ; --- 1. Execution Engine (Static) ---
     ; ==========================================
     static ProcessQuickPrompt(groupNum) {
+        if PromptSequenceBusy()
+            return
         PromptManager.selectedIndex := 0
         PromptManager.dataGroup := ConfigReadPromptItems(groupNum)
         tapKey := GetPromptTapKey(A_ThisHotkey)
@@ -71,13 +73,15 @@ class PromptManager {
     }
 
     static ExecutePrompt() {
+        if PromptSequenceBusy()
+            return
         if (PromptManager.selectedIndex > 0 && PromptManager.selectedIndex <= PromptManager.dataGroup.Length && PromptManager.dataGroup[
             PromptManager.selectedIndex].msg != "") {
             msg := PromptManager.dataGroup[PromptManager.selectedIndex].msg
             if (HasSpecialKeys(msg)) {
                 ExecutePromptSequence(msg)
             } else {
-                expanded := ExpandPromptDynamicTokens(msg, GetCurrentClipboardText())
+                expanded := ExpandPromptDynamicTokens(msg, GetUserClipboardText())
                 if (expanded == "") {
                     ShowFeedbackToolTip("ℹ️ Nothing to paste (clipboard has no text)", 1500)
                     return
@@ -367,41 +371,36 @@ class PromptManager {
 
             targetDropdownIdx := ddlTargetSlot.Value
             targetNum := Mod(targetDropdownIdx, 10)
-            if (isEdit && (editIdx < 1 || editIdx > this.localData[currNum].Length
-                || this.localData[currNum][editIdx].Title !== origTitle
-                || this.localData[currNum][editIdx].Msg !== origMsg)) {
-                MsgBox("⚠️ The original prompt entry changed while editing. Close and reopen the prompt before saving.",
+
+            ; Apply this one change to the slots as they are on disk now. The
+            ; copy in memory is the one the window opened with, and saving it
+            ; would overwrite all ten slots, losing anything changed in the
+            ; file meanwhile (App Info's Open buttons, a synced copy).
+            try latest := ConfigReadPromptData()
+            catch Error as err {
+                MsgBox("❌ The prompt file could not be read, so nothing was saved.`n`nError: " . err.Message,
+                    "Save Failed", 262160)
+                return
+            }
+            if !PromptApplyEdit(latest, currNum, targetNum, isEdit, editIdx, origTitle, origMsg, t, m) {
+                this.localData := latest
+                this.RefreshList()
+                MsgBox("⚠️ This prompt was changed outside this window while you were editing. Close and reopen it before saving.",
                     "Prompt List Changed", 262192)
                 return
             }
 
-            ; Check the resulting slot size before committing it to memory, so an
-            ; over-long prompt is refused instead of being written as a section
-            ; Windows cannot read back (which the next save turns into deletion).
-            candidate := []
-            for existing in this.localData[targetNum]
-                candidate.Push(existing)
-            if (isEdit && targetNum == currNum)
-                candidate[editIdx] := { Title: t, Msg: m }
-            else
-                candidate.Push({ Title: t, Msg: m })
-
-            limitWarning := ConfigCheckPromptSlotLimit(candidate)
+            ; Check the resulting slot size before saving, so an over-long
+            ; prompt is refused instead of being written as a section Windows
+            ; cannot read back (which the next save turns into deletion).
+            limitWarning := ConfigCheckPromptSlotLimit(latest[targetNum])
             if (limitWarning != "") {
                 MsgBox("⚠️ " . limitWarning, "Prompt Slot Too Large", 262192)
                 return
             }
 
             movedSlot := (targetNum != currNum)
-            if (isEdit && !movedSlot) {
-                this.localData[currNum][editIdx].Title := t
-                this.localData[currNum][editIdx].Msg := m
-            } else {
-                if (isEdit)
-                    this.localData[currNum].RemoveAt(editIdx)
-                this.localData[targetNum].Push({ Title: t, Msg: m })
-            }
-
+            this.localData := latest
             if !this.SaveSettings(false)
                 return
             if (movedSlot) {
@@ -591,6 +590,10 @@ class PromptManager {
     SaveSettings(showFeedback := true) {
         try {
             ConfigWritePromptData(this.localData)
+            ; Keep the copy in memory equal to what the file reads back. A save
+            ; does not round-trip text exactly (CRLF, outer whitespace), and the
+            ; edit popup compares the file against this copy before saving.
+            try this.localData := ConfigReadPromptData()
             if showFeedback
                 this.ShowAutoSaveFeedback()
             return true
@@ -641,14 +644,44 @@ HasSpecialKeys(msg) {
     return RegExMatch(StripPromptDynamicTokens(msg), "\{[^}]+\}") > 0
 }
 
+; True while a prompt sequence runs. Its {Wait} and key delays let a second
+; prompt start in the middle: that prompt's text landed between the first
+; one's fragments, the first one's remaining keys ({Enter}) then acted on the
+; mix, and the clipboard kept the second prompt instead of the user's copy.
+; Every prompt entry point is refused meanwhile, rather than queued: a queued
+; prompt would paste later into whatever window has the focus by then.
+global g_promptSequenceRunning := false
+
+; Returns true, and says why nothing happens, while a prompt sequence runs.
+PromptSequenceBusy() {
+    global g_promptSequenceRunning
+    if !g_promptSequenceRunning
+        return false
+    ShowFeedbackToolTip("⏳ A prompt is still running — try again when it finishes", 1500)
+    return true
+}
+
 ExecutePromptSequence(msg) {
+    global g_promptSequenceRunning
+    if PromptSequenceBusy()
+        return
+    g_promptSequenceRunning := true
+    try RunPromptSequence(msg)
+    finally g_promptSequenceRunning := false
+}
+
+RunPromptSequence(msg) {
     static DEFAULT_KEY_DELAY := 50
     static PASTE_DELAY := 100
     static ACTION_TAG_PATTERN := "i)\{(?!Clipboard\}|Date\}|Time\})[^}]+\}"
 
     snapshot := SnapshotUserClipboard()
-    liveClipText := GetCurrentClipboardText()
+    liveClipText := GetUserClipboardText()
     lastPasted := ""
+    ; Clipboard sequence number right after this sequence's last write.
+    lastWriteSeq := 0
+    ; The sequence number when this sequence last looked at the clipboard.
+    seenSeq := GetClipboardSequenceNumber()
     pendingCopyCheck := false
     seqBeforeCopy := 0
     pos := 1
@@ -669,6 +702,22 @@ ExecutePromptSequence(msg) {
                 snapshot := freshSnapshot
         }
         pendingCopyCheck := false
+    }
+
+    ; A copy made while the sequence runs, typically by the user during a
+    ; {Wait}, is what must be kept: the next fragment would overwrite it and
+    ; the restore afterwards would bring back the older snapshot. Any change
+    ; counts, the same rule the restore timer applies: a copy of the same text
+    ; in another format cannot be told apart from our own fragment by its text.
+    KeepNewerClipboard() {
+        nowSeq := GetClipboardSequenceNumber()
+        if (seenSeq == 0 || nowSeq == seenSeq)
+            return
+        seenSeq := nowSeq
+        liveClipText := GetCurrentClipboardText()
+        freshSnapshot := CaptureClipboardSnapshot()
+        if (freshSnapshot.HasSaved)
+            snapshot := freshSnapshot
     }
 
     while (pos <= msgLen) {
@@ -709,6 +758,7 @@ ExecutePromptSequence(msg) {
             if (plainText != "") {
                 if (pendingCopyCheck)
                     RefreshClipboardAfterCopyTag()
+                KeepNewerClipboard()
                 expandedPlain := ExpandPromptDynamicTokens(plainText, liveClipText)
                 if (expandedPlain != "") {
                     PausePendingClipboardRestore()
@@ -718,12 +768,14 @@ ExecutePromptSequence(msg) {
                     ; halfway through a key sequence, with part of it already sent.
                     if !TrySetPromptClipboard(expandedPlain) {
                         if (lastPasted != "")
-                            ScheduleClipboardRestore(snapshot, lastPasted, 3000)
+                            ScheduleClipboardRestore(snapshot, lastPasted, 3000, lastWriteSeq)
                         else
                             ReschedulePendingClipboardRestore(3000)
                         ReportClipboardBusy()
                         return
                     }
+                    lastWriteSeq := GetClipboardSequenceNumber()
+                    seenSeq := lastWriteSeq
                     lastPasted := expandedPlain
                     ClipWait(1)
                     Send("^v")
@@ -734,7 +786,7 @@ ExecutePromptSequence(msg) {
     }
 
     if (lastPasted != "")
-        ScheduleClipboardRestore(snapshot, lastPasted, 3000)
+        ScheduleClipboardRestore(snapshot, lastPasted, 3000, lastWriteSeq)
 }
 
 _ConvertComboKey(tagContent) {

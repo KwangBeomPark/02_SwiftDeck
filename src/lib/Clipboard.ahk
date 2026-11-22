@@ -45,30 +45,55 @@ GetCurrentClipboardText() {
 global g_pendingClipboardRestore := ""
 global g_pendingClipboardText := ""
 global g_pendingClipboardSeq := 0
+; Plain text of the snapshot waiting to be restored: what the user had copied.
+global g_pendingClipboardUserText := ""
 
 ClearPendingClipboardRestore() {
-    global g_pendingClipboardRestore, g_pendingClipboardText, g_pendingClipboardSeq
+    global g_pendingClipboardRestore, g_pendingClipboardText, g_pendingClipboardSeq, g_pendingClipboardUserText
     SetTimer(PendingClipboardRestoreTimer, 0)
     g_pendingClipboardRestore := ""
     g_pendingClipboardText := ""
     g_pendingClipboardSeq := 0
+    g_pendingClipboardUserText := ""
 }
 
 CaptureClipboardSnapshot() {
-    try return { HasSaved: true, Saved: ClipboardAll() }
+    try return { HasSaved: true, Saved: ClipboardAll(), Text: GetCurrentClipboardText() }
     catch
-        return { HasSaved: false, Saved: "" }
+        return { HasSaved: false, Saved: "", Text: "" }
+}
+
+; True while a restore is pending and the clipboard has not changed since this
+; app pasted: it still holds that prompt, and the user's copy is the snapshot.
+ClipboardHoldsPendingPaste() {
+    global g_pendingClipboardRestore, g_pendingClipboardSeq
+    return (g_pendingClipboardRestore != "" && g_pendingClipboardSeq != 0
+        && GetClipboardSequenceNumber() == g_pendingClipboardSeq)
 }
 
 SnapshotUserClipboard() {
-    global g_pendingClipboardRestore, g_pendingClipboardSeq
-    if (g_pendingClipboardRestore != "" && GetClipboardSequenceNumber() == g_pendingClipboardSeq)
-        return { HasSaved: true, Saved: g_pendingClipboardRestore }
+    global g_pendingClipboardRestore, g_pendingClipboardUserText
+    if ClipboardHoldsPendingPaste()
+        return { HasSaved: true, Saved: g_pendingClipboardRestore, Text: g_pendingClipboardUserText }
     return CaptureClipboardSnapshot()
 }
 
-ScheduleClipboardRestore(snapshot, lastPastedText, delayMs := 3000) {
-    global g_pendingClipboardRestore, g_pendingClipboardText, g_pendingClipboardSeq
+; Text for a {Clipboard} tag. For a few seconds after a paste the clipboard
+; still holds that prompt, so a second prompt fired meanwhile would insert the
+; first prompt instead of what the user copied, which is the pending snapshot.
+GetUserClipboardText() {
+    global g_pendingClipboardUserText
+    if ClipboardHoldsPendingPaste()
+        return g_pendingClipboardUserText
+    return GetCurrentClipboardText()
+}
+
+; writeSeq is the clipboard sequence number read right after this app's write.
+; Read here instead, after a trailing {Wait}, it would already count a copy the
+; user made meanwhile, and a copy of the same text would then be overwritten
+; as if it were ours.
+ScheduleClipboardRestore(snapshot, lastPastedText, delayMs := 3000, writeSeq := 0) {
+    global g_pendingClipboardRestore, g_pendingClipboardText, g_pendingClipboardSeq, g_pendingClipboardUserText
     SetTimer(PendingClipboardRestoreTimer, 0)
     if (!IsObject(snapshot) || !snapshot.HasSaved || lastPastedText == "") {
         ClearPendingClipboardRestore()
@@ -76,7 +101,8 @@ ScheduleClipboardRestore(snapshot, lastPastedText, delayMs := 3000) {
     }
     g_pendingClipboardRestore := snapshot.Saved
     g_pendingClipboardText := lastPastedText
-    g_pendingClipboardSeq := GetClipboardSequenceNumber()
+    g_pendingClipboardSeq := writeSeq ? writeSeq : GetClipboardSequenceNumber()
+    g_pendingClipboardUserText := snapshot.HasOwnProp("Text") ? snapshot.Text : ""
     SetTimer(PendingClipboardRestoreTimer, -delayMs)
 }
 
@@ -116,8 +142,9 @@ PastePromptText(text, color := "black", sizePt := 11) {
         return false
     }
 
+    writeSeq := GetClipboardSequenceNumber()
     Send("^v")
-    ScheduleClipboardRestore(snapshot, text, 3000)
+    ScheduleClipboardRestore(snapshot, text, 3000, writeSeq)
     return true
 }
 

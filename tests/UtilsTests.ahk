@@ -302,4 +302,39 @@ AssertEqual(ExpandPromptDynamicTokens("{Clipboard}", "", fixedStamp),
 AssertEqual(StripPromptDynamicTokens("Hi {Clipboard} on {Date} at {Time}{Enter}"),
     "Hi  on  at {Enter}", "StripPromptDynamicTokens removes only dynamic tokens and leaves key tags")
 
+; --- Prompt popup save applied to the slots as they are on disk ---
+PromptTitles(lists, slot) {
+    out := ""
+    for item in lists[slot]
+        out .= "[" . item.Title . "=" . item.Msg . "]"
+    return out
+}
+NewPromptLists() {
+    lists := Map()
+    loop 10
+        lists[A_Index - 1] := []
+    lists[1].Push({ Title: "A", Msg: "a" }, { Title: "B", Msg: "b" })
+    lists[2].Push({ Title: "Elsewhere", Msg: "changed on disk" })
+    return lists
+}
+lists := NewPromptLists()
+AssertTrue(PromptApplyEdit(lists, 1, 1, true, 2, "B", "b", "B2", "b2"), "An unchanged entry can be edited in place")
+AssertEqual(PromptTitles(lists, 1), "[A=a][B2=b2]", "The edit replaces only that entry")
+AssertEqual(PromptTitles(lists, 2), "[Elsewhere=changed on disk]", "Another slot changed on disk is kept")
+
+lists := NewPromptLists()
+AssertTrue(PromptApplyEdit(lists, 1, 3, true, 1, "A", "a", "A", "a"), "An unchanged entry can be moved")
+AssertEqual(PromptTitles(lists, 1) . "|" . PromptTitles(lists, 3), "[B=b]|[A=a]", "A move removes it from its slot and appends it to the target")
+
+lists := NewPromptLists()
+AssertTrue(PromptApplyEdit(lists, 1, 1, false, 0, "", "", "C", "c"), "Adding needs no original entry")
+AssertEqual(PromptTitles(lists, 1), "[A=a][B=b][C=c]", "An added prompt goes to the end of its slot")
+
+lists := NewPromptLists()
+AssertEqual(PromptApplyEdit(lists, 1, 1, true, 2, "B", "old text", "B2", "b2"), false, "An entry whose text changed on disk is refused")
+AssertEqual(PromptTitles(lists, 1), "[A=a][B=b]", "A refused edit leaves the lists untouched")
+AssertEqual(PromptApplyEdit(lists, 1, 1, true, 2, "b", "b", "B2", "b2"), false, "Titles are compared case-sensitively")
+AssertEqual(PromptApplyEdit(lists, 1, 3, true, 3, "B", "b", "B", "b"), false, "An entry removed on disk is refused")
+AssertEqual(PromptTitles(lists, 3), "", "A refused move adds nothing to the target slot")
+
 TestsPassed("Utils")

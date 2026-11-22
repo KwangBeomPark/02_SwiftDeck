@@ -769,3 +769,26 @@ ExpandPromptDynamicTokens(text, clipText := "", timestamp := "") {
 StripPromptDynamicTokens(text) {
     return RegExReplace(text, "i)\{(Clipboard|Date|Time)\}", "")
 }
+
+; One add, edit or move from the prompt popup, applied to `lists` (slot number
+; -> array of {Title, Msg}) as read from disk just before saving, so a change
+; made to the file while the popup was open survives in every other entry.
+; Returns false and leaves `lists` untouched when the entry being edited is no
+; longer the one the popup opened: it was changed, moved or removed meanwhile.
+; origTitle and origMsg must come from the same reader as `lists`; a save does
+; not round-trip text exactly (CRLF, leading and trailing whitespace).
+PromptApplyEdit(lists, currNum, targetNum, isEdit, editIdx, origTitle, origMsg, newTitle, newMsg) {
+    if isEdit {
+        source := lists[currNum]
+        if (editIdx < 1 || editIdx > source.Length
+            || source[editIdx].Title !== origTitle || source[editIdx].Msg !== origMsg)
+            return false
+        if (targetNum == currNum) {
+            source[editIdx] := { Title: newTitle, Msg: newMsg }
+            return true
+        }
+        source.RemoveAt(editIdx)
+    }
+    lists[targetNum].Push({ Title: newTitle, Msg: newMsg })
+    return true
+}
