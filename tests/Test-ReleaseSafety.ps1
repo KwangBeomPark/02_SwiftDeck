@@ -2,6 +2,10 @@
 param()
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
+# Set below while this test runs the unsafe entry points. Seeing it here means
+# one of them got past its guard into a build, which runs this test again:
+# stop now rather than recurse until the CI time limit.
+if ($env:SWIFTDECK_RELEASE_SAFETY_PROBE) { throw 'Test-ReleaseSafety.ps1 was started by its own guard probe: a guard let a build through.' }
 . (Join-Path (Split-Path -Parent $PSScriptRoot) 'scripts\Common.ps1')
 . (Join-Path (Split-Path -Parent $PSScriptRoot) 'scripts\ReleaseSafety.ps1')
 $fixture = Join-Path ([IO.Path]::GetTempPath()) ('swiftdeck-release-test-' + [guid]::NewGuid().ToString('N'))
@@ -137,20 +141,50 @@ try {
         Assert-Test $true 'Matching explicit origin rejected.'
         Expect-Failure { Assert-SuiteOrigin $repoRoot 'KwangBeomPark/DIFFERENT' } 'Wrong publication origin accepted.'
     } finally { Set-Item Function:\Invoke-Git -Value $invokeGitOriginal }
-    $official = Join-Path $repoRoot 'release'
-    $before = @(Get-ChildItem -LiteralPath $official -File | Sort-Object Name | ForEach-Object { "$($_.Name):$((Get-FileHash -LiteralPath $_.FullName).Hash)" }) -join "`n"
-    foreach ($arguments in @(
-        @('-File', (Join-Path $repoRoot 'scripts\build.ps1'), '-OutputDirectory', 'release'),
-        @('-File', (Join-Path $repoRoot 'scripts\build.ps1'), '-OutputDirectory', 'build\guard-test', '-Publish'),
-        @('-File', (Join-Path $repoRoot 'scripts\release.ps1'), '-SkipSigning', '-Publish'),
-        @('-File', (Join-Path $repoRoot 'scripts\publish.ps1'), '-AllowUnsigned'),
-        @('-File', (Join-Path $repoRoot 'scripts\sign.ps1'), '-ReleaseDir', 'build\not-official')
-    )) {
-        $result = Invoke-Native powershell.exe (@('-NoProfile', '-ExecutionPolicy', 'Bypass') + $arguments)
-        Assert-Test ($result.ExitCode -ne 0) 'An unsafe entry point was accepted.'
+    # release\ is git-ignored, so a fresh checkout (CI) has none. There the
+    # guard must not create it; where it exists, it must not change anything
+    # in it: the root's kind, and every entry below it, hidden ones included.
+    function Get-OfficialSnapshot {
+        param([string]$Path)
+        if (-not (Test-Path -LiteralPath $Path)) { return '<absent>' }
+        $root = Get-Item -LiteralPath $Path -Force
+        if (-not $root.PSIsContainer) { return "<file>:$((Get-FileHash -LiteralPath $root.FullName).Hash)" }
+        $prefix = $root.FullName.TrimEnd('\') + '\'
+        $entries = @(Get-ChildItem -LiteralPath $root.FullName -Recurse -Force | ForEach-Object {
+            $relative = $_.FullName.Substring($prefix.Length)
+            if ($_.PSIsContainer) { "dir:$relative" } else { "file:${relative}:$((Get-FileHash -LiteralPath $_.FullName).Hash)" }
+        } | Sort-Object)
+        return (@('<dir>') + $entries) -join "`n"
     }
-    $after = @(Get-ChildItem -LiteralPath $official -File | Sort-Object Name | ForEach-Object { "$($_.Name):$((Get-FileHash -LiteralPath $_.FullName).Hash)" }) -join "`n"
-    Assert-Test ($before -ceq $after) 'Safety guard checks changed existing official assets.'
+    $official = Join-Path $repoRoot 'release'
+    $before = Get-OfficialSnapshot $official
+    # Each call must be stopped by its own guard. A non-zero exit alone would
+    # also pass if the guard were gone and the call failed later, for example
+    # on a missing compiler or certificate. A terminating error prints its
+    # message as the first error line; the source line shown after it starts
+    # with "+", so an exact first-line match cannot be met by quoted code.
+    # publish.ps1 also gets -WhatIf: should its guard ever go, a checkout that
+    # meets the publication conditions must still not publish from a test.
+    $env:SWIFTDECK_RELEASE_SAFETY_PROBE = '1'
+    try {
+        foreach ($guard in @(
+            @{ Arguments = @('-File', (Join-Path $repoRoot 'scripts\build.ps1'), '-OutputDirectory', 'release'); Refusal = 'Local build output must be inside build, dist or out.' },
+            @{ Arguments = @('-File', (Join-Path $repoRoot 'scripts\build.ps1'), '-OutputDirectory', 'build\guard-test', '-Publish'); Refusal = 'Use publish.ps1 explicitly after a signed, verified release. build.ps1 never publishes.' },
+            @{ Arguments = @('-File', (Join-Path $repoRoot 'scripts\release.ps1'), '-SkipSigning', '-Publish'); Refusal = 'Unsigned builds cannot be published.' },
+            @{ Arguments = @('-File', (Join-Path $repoRoot 'scripts\publish.ps1'), '-AllowUnsigned', '-WhatIf'); Refusal = 'Unsigned official publication is prohibited.' },
+            @{ Arguments = @('-File', (Join-Path $repoRoot 'scripts\sign.ps1'), '-ReleaseDir', 'build\not-official'); Refusal = 'The official output must be the repository release directory.' }
+        )) {
+            $result = Invoke-Native powershell.exe (@('-NoProfile', '-ExecutionPolicy', 'Bypass') + $guard.Arguments)
+            Assert-Test ($result.ExitCode -ne 0) 'An unsafe entry point was accepted.'
+            $errorLines = @($result.StdErr)
+            $firstError = if ($errorLines.Count -gt 0) { $errorLines[0] } else { '' }
+            Assert-Test ($firstError -ceq $guard.Refusal) "An unsafe entry point was not stopped by its guard: $($guard.Refusal)"
+        }
+    } finally {
+        Remove-Item Env:\SWIFTDECK_RELEASE_SAFETY_PROBE -ErrorAction SilentlyContinue
+    }
+    $after = Get-OfficialSnapshot $official
+    Assert-Test ($before -ceq $after) 'Safety guard checks created or changed official assets.'
     Write-Host "Release safety: $count assertions passed (mock signatures; no signing or publication)."
 } finally {
     if (Test-Path Function:\Move-SuiteDirectory) { Remove-Item Function:\Move-SuiteDirectory }
