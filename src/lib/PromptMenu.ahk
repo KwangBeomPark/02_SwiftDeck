@@ -55,6 +55,8 @@ BuildPromptMenu() {
         emptyHint := "(No prompts registered)"
         g_promptMenu.Add(emptyHint, (*) => 0)
         g_promptMenu.Disable(emptyHint)
+        g_promptMenu.Add()
+        g_promptMenu.Add("⚙️ Manage Prompts...", (*) => OpenDashboardTab(2))
         return
     }
 
@@ -82,6 +84,8 @@ BuildPromptMenu() {
             g_promptMenu.Disable(emptyLabel)
         }
     }
+    g_promptMenu.Add()
+    g_promptMenu.Add(UniqueMenuLabel("⚙️ Manage Prompts...", usedGroupLabels), (*) => OpenDashboardTab(2))
 }
 
 ShowPromptMenu(*) {
@@ -105,6 +109,11 @@ _ExecutePromptFromMenu(groupNum, itemIdx, *) {
     if (HasSpecialKeys(msg)) {
         ExecutePromptSequence(msg)
     } else {
-        PastePromptText(msg)
+        expanded := ExpandPromptDynamicTokens(msg, GetCurrentClipboardText())
+        if (expanded == "") {
+            ShowFeedbackToolTip("ℹ️ Nothing to paste (clipboard has no text)", 1500)
+            return
+        }
+        PastePromptText(expanded)
     }
 }

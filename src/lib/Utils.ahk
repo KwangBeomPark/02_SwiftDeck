@@ -615,20 +615,12 @@ WouldExceedWorkArea(logicalWidth, logicalHeight, dpi := 0, workWidth := 0, workH
 ; GUI option string for a window of this design size. Empty in the normal case;
 ; "-DPIScale" when honouring the display scaling would push controls off-screen,
 ; which renders the window smaller but complete rather than large and truncated.
-GetFittingGuiOptions(logicalWidth, logicalHeight) {
-    return WouldExceedWorkArea(logicalWidth, logicalHeight) ? " -DPIScale" : ""
-}
-
-ShowCenteredOnMouse(guiObj, options := "") {
-    guiObj.Show("Hide " . options)
-    ; Physical size, to match MonitorGetWorkArea. Gui.GetPos divides Width and
-    ; Height by the display scaling, so at 150% a 550px-tall window would be
-    ; centered as 550 while really 825 tall, pushing its bottom off-screen.
-    WinGetPos(,, &gW, &gH, guiObj.Hwnd)
-
+; Shared monitor lookup at the mouse cursor so DPI opt-out and window centering
+; inspect the exact same monitor and work area.
+GetMonitorMetricsAtMouse() {
     CoordMode("Mouse", "Screen")
     MouseGetPos(&mX, &mY)
-    
+
     monitorCount := MonitorGetCount()
     idx := MonitorGetPrimary()
     loop monitorCount {
@@ -638,11 +630,44 @@ ShowCenteredOnMouse(guiObj, options := "") {
             break
         }
     }
-    
-    ; Use WorkArea to avoid taskbar overlap
+
     MonitorGetWorkArea(idx, &WL, &WT, &WR, &WB)
-    centeredPos := CalculateCenteredWindowPosition(gW, gH, WL, WT, WR, WB)
-    
+    dpi := A_ScreenDPI
+    try {
+        hMon := (A_PtrSize == 8)
+            ? DllCall("MonitorFromPoint", "int64", (mY << 32) | (mX & 0xFFFFFFFF), "uint", 2, "ptr")
+            : DllCall("MonitorFromPoint", "int", mX, "int", mY, "uint", 2, "ptr")
+        dpiX := 0, dpiY := 0
+        if (hMon && DllCall("shcore\GetDpiForMonitor", "ptr", hMon, "int", 0, "uint*", &dpiX, "uint*", &dpiY, "int") == 0 && dpiX > 0)
+            dpi := dpiX
+    }
+    return {
+        Index: idx,
+        WorkLeft: WL,
+        WorkTop: WT,
+        WorkRight: WR,
+        WorkBottom: WB,
+        WorkWidth: Max(0, WR - WL),
+        WorkHeight: Max(0, WB - WT),
+        Dpi: Max(A_ScreenDPI, dpi)
+    }
+}
+
+GetFittingGuiOptions(logicalWidth, logicalHeight) {
+    metrics := GetMonitorMetricsAtMouse()
+    return WouldExceedWorkArea(logicalWidth, logicalHeight, metrics.Dpi, metrics.WorkWidth, metrics.WorkHeight) ? " -DPIScale" : ""
+}
+
+ShowCenteredOnMouse(guiObj, options := "") {
+    guiObj.Show("Hide " . options)
+    ; Physical size, to match MonitorGetWorkArea. Gui.GetPos divides Width and
+    ; Height by the display scaling, so at 150% a 550px-tall window would be
+    ; centered as 550 while really 825 tall, pushing its bottom off-screen.
+    WinGetPos(,, &gW, &gH, guiObj.Hwnd)
+
+    metrics := GetMonitorMetricsAtMouse()
+    centeredPos := CalculateCenteredWindowPosition(gW, gH, metrics.WorkLeft, metrics.WorkTop, metrics.WorkRight, metrics.WorkBottom)
+
     ; WinMove uses physical screen coordinates regardless of DPIScale
     WinMove(centeredPos.X, centeredPos.Y, , , guiObj.Hwnd)
     guiObj.Show(options)
@@ -702,4 +727,45 @@ UpdateSelectionButtons(listBox, buttons, fallbackCtrl) {
             try fallbackCtrl.Focus()
         btn.Enabled := hasSelection
     }
+}
+
+; Decoupled bridge so popup menus can jump to a specific dashboard tab without
+; creating a circular include dependency with DashboardManager.ahk.
+global g_dashboardOpenCallback := ""
+
+RegisterDashboardOpenCallback(callback := "") {
+    global g_dashboardOpenCallback
+    g_dashboardOpenCallback := callback
+}
+
+OpenDashboardTab(tabIndex := 1) {
+    global g_dashboardOpenCallback
+    if IsObject(g_dashboardOpenCallback)
+        g_dashboardOpenCallback.Call(tabIndex)
+}
+
+; Expands {Clipboard}, {Date}, and {Time} tokens in a single left-to-right pass
+; so replacement text inside the clipboard cannot trigger a second expansion.
+ExpandPromptDynamicTokens(text, clipText := "", timestamp := "") {
+    result := ""
+    pos := 1
+    while (RegExMatch(text, "i)\{(Clipboard|Date|Time)\}", &m, pos)) {
+        if (m.Pos > pos)
+            result .= SubStr(text, pos, m.Pos - pos)
+        tokenName := StrLower(m[1])
+        if (tokenName == "clipboard")
+            result .= clipText
+        else if (tokenName == "date")
+            result .= FormatTime(timestamp, "yyyy-MM-dd")
+        else if (tokenName == "time")
+            result .= FormatTime(timestamp, "HH:mm")
+        pos := m.Pos + m.Len
+    }
+    if (pos <= StrLen(text))
+        result .= SubStr(text, pos)
+    return result
+}
+
+StripPromptDynamicTokens(text) {
+    return RegExReplace(text, "i)\{(Clipboard|Date|Time)\}", "")
 }

@@ -189,6 +189,46 @@ class PreferencesManager {
         return row
     }
 
+    ApplyHotkeyRow(row, parsed) {
+        row.Ctrl.Value := parsed.Mods.Ctrl
+        row.Shift.Value := parsed.Mods.Shift
+        row.Win.Value := parsed.Mods.Win
+        row.Alt.Value := parsed.Mods.Alt
+        row.Key.Text := parsed.Key
+    }
+
+    ; Reloads control values from disk when the dashboard is reopened, while
+    ; preserving in-progress edits if the user has unsaved changes.
+    ReloadFromDisk() {
+        if this.IsDirty()
+            return
+
+        settings := ConfigGetFallbackAppSettings()
+        try settings := ConfigReadAppSettings()
+        migrated := MigratePromptModifier(settings.PromptModifier, settings.PromptUseNumpad)
+        mainParsed := ParseKeyString(settings.MainHotkey)
+        promptParsed := ParseKeyString(migrated.Mod)
+        emojiParsed := ParseKeyString(settings.EmojiHotkey)
+        exitParsed := ParseKeyString(settings.ExitHotkey)
+
+        this.ApplyHotkeyRow(
+            { Ctrl: this.chkMainCtrl, Shift: this.chkMainShift, Win: this.chkMainWin, Alt: this.chkMainAlt, Key: this.cbMainKey },
+            mainParsed
+        )
+        this.chkPromptCtrl.Value := promptParsed.Mods.Ctrl
+        this.chkPromptShift.Value := promptParsed.Mods.Shift
+        this.chkPromptWin.Value := promptParsed.Mods.Win
+        this.chkPromptAlt.Value := promptParsed.Mods.Alt
+        this.ddlPromptNumpad.Choose((migrated.UseNumpad == 1) ? 1 : 2)
+        this.ApplyHotkeyRow(this.emojiControls, emojiParsed)
+        this.ApplyHotkeyRow(this.exitControls, exitParsed)
+        this.chkStartup.Value := ConfigIsStartupEnabled()
+
+        this.UpdateMainHotkeyPreview()
+        this.UpdatePromptPreview()
+        this.MarkClean()
+    }
+
     ; Reads one hotkey row back into an AutoHotkey hotkey string.
     ReadHotkeyRow(row) {
         baseKey := Trim(row.Key.Text)

@@ -45,6 +45,11 @@ class PromptManager {
         total := PromptManager.dataGroup.Length
 
         while PromptHotkeyModifierPressed(A_ThisHotkey) {
+            if GetKeyState("Escape", "P") {
+                PromptManager.selectedIndex := 0
+                ShowFeedbackToolTip("🚫 Prompt cancelled", 1000)
+                return
+            }
             if GetKeyState(tapKey, "P") {
                 PromptManager.selectedIndex := (PromptManager.selectedIndex < PromptManager.dataGroup.Length) ? PromptManager.selectedIndex + 1 :
                     1
@@ -72,10 +77,15 @@ class PromptManager {
             if (HasSpecialKeys(msg)) {
                 ExecutePromptSequence(msg)
             } else {
+                expanded := ExpandPromptDynamicTokens(msg, GetCurrentClipboardText())
+                if (expanded == "") {
+                    ShowFeedbackToolTip("ℹ️ Nothing to paste (clipboard has no text)", 1500)
+                    return
+                }
                 ; Return without clearing the tooltip on failure: PastePromptText
                 ; has just shown the "clipboard is busy" warning, and the
                 ; ToolTip() below would wipe it in the same tick.
-                if !PastePromptText(msg,
+                if !PastePromptText(expanded,
                     PromptManager.dataGroup[PromptManager.selectedIndex].fontColor,
                     PromptManager.dataGroup[PromptManager.selectedIndex].fontSize)
                     return
@@ -90,6 +100,7 @@ class PromptManager {
     ; ==========================================
     __New(parentGui := "") {
         this.parentGui := parentGui
+        this.isEditingPopup := false
         this.localData := ConfigReadPromptData()
         this.slotNames := ConfigReadPromptSlotNames()
         if (parentGui)
@@ -119,14 +130,15 @@ class PromptManager {
         if (!this.parentGui)
             guiObj.OnEvent("Close", (*) => guiObj.Destroy())
 
-        settings := ConfigReadAppSettings()
+        settings := ConfigGetFallbackAppSettings()
+        try settings := ConfigReadAppSettings()
         migrated := MigratePromptModifier(settings.PromptModifier, settings.PromptUseNumpad)
         friendlyMod := FormatHotkeyDisplay(migrated.Mod)
         keySuffix := migrated.UseNumpad ? "Numpad" : "Number"
         this.slotKeySuffix := keySuffix
         slotText := "① Select Slot (" . friendlyMod . keySuffix . "):"
 
-        guiObj.Add("Text", "x" . startX . " y" . startY . " w300", slotText)
+        this.txtSlotHeader := guiObj.Add("Text", "x" . startX . " y" . startY . " w215", slotText)
 
         guiObj.SetFont("cBlack")
         this.ddlNumpad := guiObj.Add("DropDownList", "x" . (startX + 220) . " y" . (startY - 5) . " w185 Choose1", this.BuildSlotChoices())
@@ -189,10 +201,12 @@ class PromptManager {
     }
 
     ShowEditPopup(isEdit := false, editIdx := 0) {
+        this.isEditingPopup := true
         WinSetEnabled(0, this.mainHwnd)
         popup := Gui("+AlwaysOnTop +Owner" . this.mainHwnd . " -MinimizeBox -MaximizeBox", isEdit ? "Edit Prompt" : "Add Prompt")
 
         CleanUpAndClose() {
+            this.isEditingPopup := false
             WinSetEnabled(1, this.mainHwnd)
             WinActivate(this.mainHwnd)
             popup.Destroy()
@@ -205,14 +219,22 @@ class PromptManager {
 
         tVal := ""
         mVal := ""
+        origTitle := ""
+        origMsg := ""
         if (isEdit && editIdx > 0 && editIdx <= this.localData[currNum].Length) {
             item := this.localData[currNum][editIdx]
             tVal := item.Title
             mVal := item.Msg
+            origTitle := tVal
+            origMsg := mVal
         }
 
-        popup.Add("Text", "x15 y15 w400 c666666", "① Prompt Title:")
-        edtTitle := popup.Add("Edit", "x15 y35 w400 h25", tVal)
+        popup.Add("Text", "x15 y15 w245 c666666", "① Prompt Title:")
+        edtTitle := popup.Add("Edit", "x15 y35 w245 h25", tVal)
+
+        popup.Add("Text", "x270 y15 w145 c666666", "Slot:")
+        ddlTargetSlot := popup.Add("DropDownList", "x270 y35 w145 Choose" . this.ddlNumpad.Value, this.BuildSlotChoices())
+        SendMessage(0x0160, Round(240 * A_ScreenDPI / 96), 0, ddlTargetSlot)  ; CB_SETDROPPEDWIDTH
 
         popup.Add("Text", "x15 y70 w130 c666666", "② Prompt Content:")
 
@@ -285,6 +307,12 @@ class PromptManager {
         mDelay.Add("{Wait:2000} 2s", InsertKeyTag)
         mDelay.Add("{Wait:3000} 3s", InsertKeyTag)
         keyMenu.Add("Delay", mDelay)
+        keyMenu.Add()
+        mDynamic := Menu()
+        mDynamic.Add("{Clipboard} Copied Text", InsertKeyTag)
+        mDynamic.Add("{Date} Today (YYYY-MM-DD)", InsertKeyTag)
+        mDynamic.Add("{Time} Current Time (HH:MM)", InsertKeyTag)
+        keyMenu.Add("Dynamic Text", mDynamic)
 
         btnInsertKey.OnEvent("Click", (*) => keyMenu.Show())
 
@@ -337,13 +365,23 @@ class PromptManager {
                 return
             }
 
+            targetDropdownIdx := ddlTargetSlot.Value
+            targetNum := Mod(targetDropdownIdx, 10)
+            if (isEdit && (editIdx < 1 || editIdx > this.localData[currNum].Length
+                || this.localData[currNum][editIdx].Title !== origTitle
+                || this.localData[currNum][editIdx].Msg !== origMsg)) {
+                MsgBox("⚠️ The original prompt entry changed while editing. Close and reopen the prompt before saving.",
+                    "Prompt List Changed", 262192)
+                return
+            }
+
             ; Check the resulting slot size before committing it to memory, so an
             ; over-long prompt is refused instead of being written as a section
             ; Windows cannot read back (which the next save turns into deletion).
             candidate := []
-            for existing in this.localData[currNum]
+            for existing in this.localData[targetNum]
                 candidate.Push(existing)
-            if (isEdit)
+            if (isEdit && targetNum == currNum)
                 candidate[editIdx] := { Title: t, Msg: m }
             else
                 candidate.Push({ Title: t, Msg: m })
@@ -354,18 +392,29 @@ class PromptManager {
                 return
             }
 
-            if (isEdit) {
+            movedSlot := (targetNum != currNum)
+            if (isEdit && !movedSlot) {
                 this.localData[currNum][editIdx].Title := t
                 this.localData[currNum][editIdx].Msg := m
             } else {
-                this.localData[currNum].Push({ Title: t, Msg: m })
+                if (isEdit)
+                    this.localData[currNum].RemoveAt(editIdx)
+                this.localData[targetNum].Push({ Title: t, Msg: m })
             }
 
             if !this.SaveSettings(false)
                 return
-            this.RefreshList(isEdit ? editIdx : this.localData[currNum].Length)
+            if (movedSlot) {
+                this.ddlNumpad.Choose(targetDropdownIdx)
+                this.RefreshList(this.localData[targetNum].Length)
+            } else {
+                this.RefreshList(isEdit ? editIdx : this.localData[currNum].Length)
+            }
             CleanUpAndClose()
-            this.ShowAutoSaveFeedback(isEdit ? "✅ Prompt saved and applied" : "✅ Prompt added and applied")
+            if (isEdit && movedSlot)
+                this.ShowAutoSaveFeedback("✅ Prompt moved to " . this.slotKeySuffix . " " . targetNum)
+            else
+                this.ShowAutoSaveFeedback(isEdit ? "✅ Prompt saved and applied" : "✅ Prompt added and applied")
         }
 
         ShowCenteredOnMouse(popup, "w430 h280")
@@ -379,13 +428,26 @@ class PromptManager {
         }
     }
 
+    UpdateSlotHeader() {
+        settings := ConfigGetFallbackAppSettings()
+        try settings := ConfigReadAppSettings()
+        migrated := MigratePromptModifier(settings.PromptModifier, settings.PromptUseNumpad)
+        friendlyMod := FormatHotkeyDisplay(migrated.Mod)
+        this.slotKeySuffix := migrated.UseNumpad ? "Numpad" : "Number"
+        if this.HasOwnProp("txtSlotHeader")
+            this.txtSlotHeader.Value := "① Select Slot (" . friendlyMod . this.slotKeySuffix . "):"
+    }
+
     ; Re-reads this tab's settings from disk. The dashboard is created once and
     ; only hidden on close, and every save rewrites the whole section from
     ; memory — so without this, edits made to the file meanwhile (App Info's
     ; Open buttons invite exactly that) are overwritten by the stale snapshot.
     ReloadFromDisk() {
+        if this.isEditingPopup
+            return
         this.localData := ConfigReadPromptData()
         this.slotNames := ConfigReadPromptSlotNames()
+        this.UpdateSlotHeader()
         if this.HasOwnProp("ddlNumpad")
             this.UpdateSlotChoices()
     }
@@ -576,31 +638,67 @@ PromptHotkeyModifierPressed(hotkeyText) {
 ; =================================================================================
 
 HasSpecialKeys(msg) {
-    return RegExMatch(msg, "\{[^}]+\}")
+    return RegExMatch(StripPromptDynamicTokens(msg), "\{[^}]+\}") > 0
 }
 
 ExecutePromptSequence(msg) {
     static DEFAULT_KEY_DELAY := 50
     static PASTE_DELAY := 100
+    static ACTION_TAG_PATTERN := "i)\{(?!Clipboard\}|Date\}|Time\})[^}]+\}"
+
+    snapshot := SnapshotUserClipboard()
+    liveClipText := GetCurrentClipboardText()
+    lastPasted := ""
+    pendingCopyCheck := false
+    seqBeforeCopy := 0
     pos := 1
     msgLen := StrLen(msg)
 
+    RefreshClipboardAfterCopyTag() {
+        if (!pendingCopyCheck)
+            return
+        loop 10 {
+            if (GetClipboardSequenceNumber() != seqBeforeCopy)
+                break
+            Sleep(25)
+        }
+        if (GetClipboardSequenceNumber() != seqBeforeCopy) {
+            liveClipText := GetCurrentClipboardText()
+            freshSnapshot := CaptureClipboardSnapshot()
+            if (freshSnapshot.HasSaved)
+                snapshot := freshSnapshot
+        }
+        pendingCopyCheck := false
+    }
+
     while (pos <= msgLen) {
-        if (RegExMatch(msg, "\{[^}]+\}", &m, pos) && m.Pos == pos) {
+        if (RegExMatch(msg, ACTION_TAG_PATTERN, &m, pos) && m.Pos == pos) {
             tagContent := SubStr(m[0], 2, StrLen(m[0]) - 2)
 
             if (RegExMatch(tagContent, "i)^Wait:(\d+)$", &wm)) {
                 Sleep(Integer(wm[1]))
+                if (pendingCopyCheck && GetClipboardSequenceNumber() != seqBeforeCopy) {
+                    liveClipText := GetCurrentClipboardText()
+                    freshSnapshot := CaptureClipboardSnapshot()
+                    if (freshSnapshot.HasSaved)
+                        snapshot := freshSnapshot
+                    pendingCopyCheck := false
+                }
             } else if (RegExMatch(tagContent, "i)^(Ctrl|Alt|Shift|Win)\+")) {
+                isCopyTag := RegExMatch(tagContent, "i)^Ctrl\+(c|x)$") > 0
+                if (isCopyTag)
+                    seqBeforeCopy := GetClipboardSequenceNumber()
                 Send(_ConvertComboKey(tagContent))
                 Sleep(DEFAULT_KEY_DELAY)
+                if (isCopyTag)
+                    pendingCopyCheck := true
             } else {
                 Send("{" . tagContent . "}")
                 Sleep(DEFAULT_KEY_DELAY)
             }
             pos := m.Pos + m.Len
         } else {
-            nextTag := RegExMatch(msg, "\{[^}]+\}", &nm, pos)
+            nextTag := RegExMatch(msg, ACTION_TAG_PATTERN, &nm, pos)
             if (nextTag > 0) {
                 plainText := SubStr(msg, pos, nextTag - pos)
                 pos := nextTag
@@ -609,20 +707,34 @@ ExecutePromptSequence(msg) {
                 pos := msgLen + 1
             }
             if (plainText != "") {
-                ; Same guarded write the plain paste path uses. A raw
-                ; "A_Clipboard :=" throws while a clipboard manager, RDP session
-                ; or Office has the clipboard open, and here that would surface
-                ; halfway through a key sequence, with part of it already sent.
-                if !TrySetPromptClipboard(plainText) {
-                    ReportClipboardBusy()
-                    return
+                if (pendingCopyCheck)
+                    RefreshClipboardAfterCopyTag()
+                expandedPlain := ExpandPromptDynamicTokens(plainText, liveClipText)
+                if (expandedPlain != "") {
+                    PausePendingClipboardRestore()
+                    ; Same guarded write the plain paste path uses. A raw
+                    ; "A_Clipboard :=" throws while a clipboard manager, RDP session
+                    ; or Office has the clipboard open, and here that would surface
+                    ; halfway through a key sequence, with part of it already sent.
+                    if !TrySetPromptClipboard(expandedPlain) {
+                        if (lastPasted != "")
+                            ScheduleClipboardRestore(snapshot, lastPasted, 3000)
+                        else
+                            ReschedulePendingClipboardRestore(3000)
+                        ReportClipboardBusy()
+                        return
+                    }
+                    lastPasted := expandedPlain
+                    ClipWait(1)
+                    Send("^v")
+                    Sleep(PASTE_DELAY)
                 }
-                ClipWait(1)
-                Send("^v")
-                Sleep(PASTE_DELAY)
             }
         }
     }
+
+    if (lastPasted != "")
+        ScheduleClipboardRestore(snapshot, lastPasted, 3000)
 }
 
 _ConvertComboKey(tagContent) {

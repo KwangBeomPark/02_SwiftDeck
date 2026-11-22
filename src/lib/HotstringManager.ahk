@@ -310,16 +310,33 @@ class HotstringManager {
     }
 
     GetRawGroupName(displayName) {
-        return displayName
+        return RegExReplace(Trim(displayName), "\s+\(\d+\)$", "")
+    }
+
+    GetCurrentGroupName() {
+        if !this.HasOwnProp("cbGroup")
+            return "Default"
+        idx := this.cbGroup.Value
+        if (this.HasOwnProp("displayedGroupNames") && idx > 0 && idx <= this.displayedGroupNames.Length)
+            return this.displayedGroupNames[idx]
+        rawName := this.GetRawGroupName(this.cbGroup.Text)
+        return (rawName != "") ? rawName : "Default"
     }
 
     UpdateGroupsDdl(selectGroup := "") {
         groups := []
+        this.displayedGroupNames := []
+        chooseIdx := 0
         for _, groupSection in this.groupOrder {
             if (this.localData.Has(groupSection)) {
                 groupName := this.GetGroupName(groupSection)
-                if (groupName != "")
-                    groups.Push(groupName)
+                if (groupName != "") {
+                    itemCount := this.localData[groupSection].Length
+                    groups.Push(groupName . " (" . itemCount . ")")
+                    this.displayedGroupNames.Push(groupName)
+                    if (selectGroup != "" && groupName == selectGroup)
+                        chooseIdx := this.displayedGroupNames.Length
+                }
             }
         }
 
@@ -327,8 +344,8 @@ class HotstringManager {
         if (groups.Length > 0)
             this.cbGroup.Add(groups)
 
-        if (selectGroup != "") {
-            this.cbGroup.Text := selectGroup
+        if (chooseIdx > 0) {
+            this.cbGroup.Choose(chooseIdx)
         } else if (groups.Length > 0) {
             this.cbGroup.Choose(1)
         }
@@ -348,10 +365,7 @@ class HotstringManager {
     }
 
     GetCurrentSection() {
-        displayName := Trim(this.cbGroup.Text)
-        if (displayName == "")
-            displayName := "Default"
-        rawName := this.GetRawGroupName(displayName)
+        rawName := this.GetCurrentGroupName()
 
         if (this.localData.Has("Group_Menu_" . rawName))
             return "Group_Menu_" . rawName
@@ -376,9 +390,12 @@ class HotstringManager {
     ; memory — so without this, edits made to the file meanwhile (App Info's
     ; Open buttons invite exactly that) are overwritten by the stale snapshot.
     ReloadFromDisk() {
+        currentGroup := this.HasOwnProp("cbGroup") ? this.GetCurrentGroupName() : ""
         hotstringData := ConfigReadHotstringData()
         this.localData := hotstringData.Data
         this.groupOrder := hotstringData.GroupOrder
+        if this.HasOwnProp("cbGroup")
+            this.UpdateGroupsDdl(currentGroup)
     }
 
     RefreshList(targetIdx := 0) {
@@ -550,6 +567,7 @@ class HotstringManager {
 
             if !this.SaveSettings(false)
                 return
+            this.UpdateGroupsDdl(this.GetCurrentGroupName())
             this.RefreshList(isEdit ? editIdx : this.localData[groupSection].Length)
             CleanUpAndClose()
             this.ShowAutoSaveFeedback(isEdit ? "✅ Hotstring saved and applied" : "✅ Hotstring added and applied")
@@ -574,6 +592,7 @@ class HotstringManager {
 
         targetIdx := selectedIndex > this.localData[groupSection].Length ? this.localData[groupSection].Length : selectedIndex
         if this.SaveSettings(false) {
+            this.UpdateGroupsDdl(this.GetCurrentGroupName())
             this.RefreshList(targetIdx)
             this.ShowAutoSaveFeedback("✅ Hotstring deleted and applied")
         }

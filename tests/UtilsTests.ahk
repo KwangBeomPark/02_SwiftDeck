@@ -274,4 +274,32 @@ AssertTrue(!HotkeyBaseKeyNeedsModifier("Escape"), "Escape stays usable on its ow
 AssertTrue(!HotkeyBaseKeyNeedsModifier("Insert"), "Insert stays usable on its own")
 AssertTrue(!HotkeyBaseKeyNeedsModifier(""), "An empty key is left to the other checks")
 
+; --- AppInfo DPI fit ---
+AssertEqual(WouldExceedWorkArea(480, 605, 96, 1920, 1032), false, "AppInfo fits a 1080p screen at 100%")
+AssertEqual(WouldExceedWorkArea(480, 605, 144, 1920, 1008), false, "AppInfo fits a 1080p screen at 150%")
+AssertEqual(WouldExceedWorkArea(480, 605, 168, 1920, 996), true, "AppInfo overflows a 1080p screen at 175% and needs -DPIScale")
+
+; --- Dashboard tab callback bridge ---
+bridgeState := { Tab: 0 }
+RegisterDashboardOpenCallback((tabIndex := 1) => (bridgeState.Tab := tabIndex))
+OpenDashboardTab(3)
+AssertEqual(bridgeState.Tab, 3, "OpenDashboardTab routes to the registered callback with the requested tab")
+RegisterDashboardOpenCallback()
+
+; --- Prompt dynamic token expansion ---
+fixedStamp := "20261120143500"
+AssertEqual(ExpandPromptDynamicTokens("Today is {Date} {Time}.", "", fixedStamp),
+    "Today is 2026-11-20 14:35.", "Date and Time tokens expand cleanly")
+AssertEqual(ExpandPromptDynamicTokens("Review:`n{Clipboard}", "Line1`nLine2", fixedStamp),
+    "Review:`nLine1`nLine2", "Clipboard token expands inline")
+AssertEqual(ExpandPromptDynamicTokens("{clipboard} @ {DATE} {time}", "Payload", fixedStamp),
+    "Payload @ 2026-11-20 14:35", "Dynamic tokens match case-insensitively")
+; Clipboard contents containing literal tokens or {Enter} must pass through verbatim.
+AssertEqual(ExpandPromptDynamicTokens("[{Clipboard}] {Date}", "literal {Date} and {Enter}", fixedStamp),
+    "[literal {Date} and {Enter}] 2026-11-20", "Clipboard content does not trigger second-pass token or key expansion")
+AssertEqual(ExpandPromptDynamicTokens("{Clipboard}", "", fixedStamp),
+    "", "Clipboard-only prompt expands to empty string when clipboard has no text")
+AssertEqual(StripPromptDynamicTokens("Hi {Clipboard} on {Date} at {Time}{Enter}"),
+    "Hi  on  at {Enter}", "StripPromptDynamicTokens removes only dynamic tokens and leaves key tags")
+
 TestsPassed("Utils")

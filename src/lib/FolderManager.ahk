@@ -71,7 +71,7 @@ class FolderManager {
         try settings := ConfigReadAppSettings()
 
         guiObj.SetFont("s9 c" . THEME_MUTED . " norm", "Segoe UI")
-        guiObj.Add("Text", "x" . startX . " y" . (startY + hintOffset) . " w405 Center",
+        this.txtHotkeyHint := guiObj.Add("Text", "x" . startX . " y" . (startY + hintOffset) . " w405 Center",
             "💡 Press " . FormatHotkeyDisplay(settings.MainHotkey) . " anywhere to open the folder menu.")
         guiObj.Add("Text", "x" . startX . " y" . (startY + autoSaveOffset) . " w405 Center", "✓ Changes are saved and applied immediately.")
         guiObj.SetFont("s10 c" . THEME_TEXT . " norm", "Segoe UI")
@@ -99,8 +99,17 @@ class FolderManager {
     ; only hidden on close, and every save rewrites the whole section from
     ; memory — so without this, edits made to the file meanwhile (App Info's
     ; Open buttons invite exactly that) are overwritten by the stale snapshot.
+    UpdateHotkeyHint() {
+        if !this.HasOwnProp("txtHotkeyHint")
+            return
+        settings := ConfigGetFallbackAppSettings()
+        try settings := ConfigReadAppSettings()
+        this.txtHotkeyHint.Value := "💡 Press " . FormatHotkeyDisplay(settings.MainHotkey) . " anywhere to open the folder menu."
+    }
+
     ReloadFromDisk() {
         this.orderedItems := FolderManager.ReadFolderItems()
+        this.UpdateHotkeyHint()
     }
 
     RefreshList(targetIdx := 0) {
@@ -311,8 +320,13 @@ class FolderManager {
     }
 
     SaveSettings(showFeedback := true) {
+        global g_FolderMenuCache, g_FolderProbeFailures
         try {
             FolderManager.WriteFolderItems(this.orderedItems)
+            if IsSet(g_FolderMenuCache) && (g_FolderMenuCache is Map)
+                g_FolderMenuCache.Clear()
+            if IsSet(g_FolderProbeFailures) && (g_FolderProbeFailures is Map)
+                g_FolderProbeFailures.Clear()
             if showFeedback
                 this.ShowAutoSaveFeedback()
             return true

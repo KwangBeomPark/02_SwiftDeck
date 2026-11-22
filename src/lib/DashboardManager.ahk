@@ -152,23 +152,16 @@ class DashboardManager {
     ; so there is no unsaved in-memory state to lose by re-reading. General is
     ; excluded: it holds pending edits behind its own Save & Apply button.
     ReloadTabsFromDisk() {
-        for manager in [this.folderMgr, this.promptMgr, this.hotstringMgr, this.keyRemapMgr] {
+        for manager in [this.folderMgr, this.promptMgr, this.hotstringMgr, this.keyRemapMgr, this.prefMgr] {
             try manager.ReloadFromDisk()
         }
     }
 
-    ; A catalog added to or replaced the prompts and hotstrings on disk.
+    ; A catalog added to or replaced the prompts and hotstrings on disk. The
+    ; Hotstrings tab's ReloadFromDisk also rebuilds its group list, keeping the
+    ; group that was open when it still exists.
     OnCatalogChanged() {
         this.ReloadTabsFromDisk()
-        ; The Hotstrings tab builds its group list once, and a catalog can add
-        ; or remove groups.
-        try {
-            hotstrings := this.hotstringMgr
-            previous := hotstrings.cbGroup.Text
-            hotstrings.UpdateGroupsDdl()
-            if (previous != "")
-                try hotstrings.cbGroup.Choose(previous)
-        }
         this.OnTabChange()
     }
 
@@ -271,3 +264,5 @@ class DashboardManager {
         return true
     }
 }
+
+RegisterDashboardOpenCallback((tabIndex := 1) => DashboardManager.Show(tabIndex))

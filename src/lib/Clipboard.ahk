@@ -26,15 +26,73 @@ ReportClipboardBusy() {
     SetTimer(() => ToolTip(), -2500)
 }
 
-; A restore that is still pending, so two prompts in quick succession do not
-; snapshot the first prompt's own text as if it were the user's clipboard.
+GetClipboardSequenceNumber() {
+    try return DllCall("GetClipboardSequenceNumber", "uint")
+    catch
+        return 0
+}
+
+; Safely reads the current plain text from the Windows clipboard without throwing
+; if another application temporarily holds it open.
+GetCurrentClipboardText() {
+    try return A_Clipboard
+    catch
+        return ""
+}
+
+; Pending restore state uses a single shared timer and tracks Windows' clipboard
+; sequence number so a newer user copy is never overwritten by an older snapshot.
 global g_pendingClipboardRestore := ""
+global g_pendingClipboardText := ""
+global g_pendingClipboardSeq := 0
+
+ClearPendingClipboardRestore() {
+    global g_pendingClipboardRestore, g_pendingClipboardText, g_pendingClipboardSeq
+    SetTimer(PendingClipboardRestoreTimer, 0)
+    g_pendingClipboardRestore := ""
+    g_pendingClipboardText := ""
+    g_pendingClipboardSeq := 0
+}
+
+CaptureClipboardSnapshot() {
+    try return { HasSaved: true, Saved: ClipboardAll() }
+    catch
+        return { HasSaved: false, Saved: "" }
+}
+
+SnapshotUserClipboard() {
+    global g_pendingClipboardRestore, g_pendingClipboardSeq
+    if (g_pendingClipboardRestore != "" && GetClipboardSequenceNumber() == g_pendingClipboardSeq)
+        return { HasSaved: true, Saved: g_pendingClipboardRestore }
+    return CaptureClipboardSnapshot()
+}
+
+ScheduleClipboardRestore(snapshot, lastPastedText, delayMs := 3000) {
+    global g_pendingClipboardRestore, g_pendingClipboardText, g_pendingClipboardSeq
+    SetTimer(PendingClipboardRestoreTimer, 0)
+    if (!IsObject(snapshot) || !snapshot.HasSaved || lastPastedText == "") {
+        ClearPendingClipboardRestore()
+        return
+    }
+    g_pendingClipboardRestore := snapshot.Saved
+    g_pendingClipboardText := lastPastedText
+    g_pendingClipboardSeq := GetClipboardSequenceNumber()
+    SetTimer(PendingClipboardRestoreTimer, -delayMs)
+}
+
+ReschedulePendingClipboardRestore(delayMs := 3000) {
+    global g_pendingClipboardRestore
+    if (g_pendingClipboardRestore != "")
+        SetTimer(PendingClipboardRestoreTimer, -delayMs)
+}
+
+PausePendingClipboardRestore() {
+    SetTimer(PendingClipboardRestoreTimer, 0)
+}
 
 ; Pasting a prompt used to leave the prompt text on the clipboard, destroying
 ; whatever the user had copied — an ordinary loss when the work is copying a
 ; cell and then firing a prompt. So the clipboard is snapshotted and put back.
-; This covers plain prompts only; prompts containing {Key} sequences go through
-; ExecutePromptSequence, which still pastes each fragment without restoring.
 ;
 ; The delay is deliberately generous. Nothing tells us when the target has
 ; actually read the clipboard, and the two ways to be wrong are not equal:
@@ -46,55 +104,47 @@ global g_pendingClipboardRestore := ""
 ; a second. Waiting costs nothing, because the guard below refuses to overwrite
 ; anything the user copied in the meantime.
 PastePromptText(text, color := "black", sizePt := 11) {
-    global g_pendingClipboardRestore
+    if (text == "")
+        return false
 
-    saved := ""
-    hasSaved := false
-    if (g_pendingClipboardRestore != "") {
-        ; A restore is already queued; its snapshot is the user's real clipboard.
-        saved := g_pendingClipboardRestore
-        hasSaved := true
-    } else {
-        try {
-            saved := ClipboardAll()
-            hasSaved := true
-        }
-    }
+    snapshot := SnapshotUserClipboard()
+    PausePendingClipboardRestore()
 
     if !TrySetPromptClipboard(text, color, sizePt) {
+        ReschedulePendingClipboardRestore(3000)
         ReportClipboardBusy()
         return false
     }
 
     Send("^v")
-
-    if (hasSaved) {
-        g_pendingClipboardRestore := saved
-        SetTimer(() => RestoreClipboardAfterPaste(saved, text), -3000)
-    }
+    ScheduleClipboardRestore(snapshot, text, 3000)
     return true
 }
 
-RestoreClipboardAfterPaste(saved, pastedText) {
-    global g_pendingClipboardRestore
+PendingClipboardRestoreTimer() {
+    global g_pendingClipboardRestore, g_pendingClipboardText, g_pendingClipboardSeq
+    saved := g_pendingClipboardRestore
+    pastedText := g_pendingClipboardText
+    expectedSeq := g_pendingClipboardSeq
+    ClearPendingClipboardRestore()
+
+    if (saved == "" || pastedText == "")
+        return
+    if (GetClipboardSequenceNumber() != expectedSeq)
+        return
 
     current := ""
     try current := A_Clipboard
-    catch {
-        g_pendingClipboardRestore := ""
+    catch
         return
-    }
 
     ; Anything other than exactly what we pasted means the user (or another app)
     ; has since put something newer there, which must win. "!==" because "!=" is
     ; case-insensitive in AutoHotkey v2.
-    if (current !== pastedText) {
-        g_pendingClipboardRestore := ""
+    if (current !== pastedText)
         return
-    }
 
     try A_Clipboard := saved
-    g_pendingClipboardRestore := ""
 }
 
 SetStyledClipboard(text, color, sizePt) {

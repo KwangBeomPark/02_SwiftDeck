@@ -52,7 +52,7 @@ ShowAppInformation(parentHwnd := 0) {
     promptConfigPath := GetConfigPath("Prompts")
     hotstringConfigPath := GetConfigPath("Hotstrings")
 
-    guiOptions := "+AlwaysOnTop -MinimizeBox -MaximizeBox"
+    guiOptions := "+AlwaysOnTop -MinimizeBox -MaximizeBox" . GetFittingGuiOptions(480, 605)
     if (parentHwnd && WinExist("ahk_id " . parentHwnd)) {
         WinSetEnabled(0, parentHwnd)
         guiOptions .= " +Owner" . parentHwnd

@@ -101,6 +101,8 @@ ShowEmojiMenu(*) {
             g_emojiMenu.Delete()
             g_emojiMenu.Add(hint, (*) => 0)
             g_emojiMenu.Disable(hint)
+            g_emojiMenu.Add()
+            g_emojiMenu.Add("⚙️ Manage Hotstrings...", (*) => OpenDashboardTab(3))
         }
     }
     g_emojiMenu.Show()
@@ -158,6 +160,12 @@ BuildEmojiMenu() {
     }
 
     g_emojiMenuHasContent := EmojiMenuItemCount() > 0
+    if (g_emojiMenuHasContent) {
+        try {
+            g_emojiMenu.Add()
+            g_emojiMenu.Add(UniqueMenuLabel("⚙️ Manage Hotstrings...", usedTopLabels), (*) => OpenDashboardTab(3))
+        }
+    }
 }
 
 ; Decides what the menu shows without touching it, so it can be tested. Each
