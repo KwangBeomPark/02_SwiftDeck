@@ -227,8 +227,9 @@ class CatalogManager {
         try {
             ; Kept to put the prompts back if the hotstrings cannot be saved;
             ; the plan works on copies and leaves this as read.
-            myPrompts := ConfigReadPromptData()
-            plan := CatalogPlanAdd(myPrompts, ConfigReadHotstringData(), this.current, picks, promptSlot)
+            mine := CatalogReadCurrentSettings()
+            myPrompts := mine.Prompts
+            plan := CatalogPlanAdd(myPrompts, mine.Hotstrings, this.current, picks, promptSlot)
         } catch Error as err {
             MsgBox("❌ The checked items could not be prepared.`n`nError: " . err.Message, "Add to Mine", 262160)
             return
@@ -292,8 +293,9 @@ class CatalogManager {
             return
 
         try {
-            previousPrompts := ConfigReadPromptData()
-            previousNames := ConfigReadPromptSlotNames()
+            previous := CatalogReadCurrentSettings()
+            previousPrompts := previous.Prompts
+            previousNames := previous.SlotNames
             backupName := CatalogSaveCurrent("My settings " . FormatTime(A_Now, "yyyy-MM-dd HH.mm.ss")).Name
         } catch Error as err {
             MsgBox("❌ Nothing was switched: your current settings could not be saved first.`n`nError: " . err.Message,
@@ -372,9 +374,10 @@ class CatalogManager {
 
     ShowExportDialog() {
         try {
-            prompts := ConfigReadPromptData()
-            names := ConfigReadPromptSlotNames()
-            hotstrings := ConfigReadHotstringData()
+            current := CatalogReadCurrentSettings()
+            prompts := current.Prompts
+            names := current.SlotNames
+            hotstrings := current.Hotstrings
         } catch Error as err {
             MsgBox("❌ Your settings could not be read.`n`nError: " . err.Message, "Export My Catalog", 262160)
             return

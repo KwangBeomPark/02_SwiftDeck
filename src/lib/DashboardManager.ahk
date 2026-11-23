@@ -152,9 +152,20 @@ class DashboardManager {
     ; so there is no unsaved in-memory state to lose by re-reading. General is
     ; excluded: it holds pending edits behind its own Save & Apply button.
     ReloadTabsFromDisk() {
+        unreadable := ""
         for manager in [this.folderMgr, this.promptMgr, this.hotstringMgr, this.keyRemapMgr, this.prefMgr] {
+            ; A tab whose file cannot be read keeps its last list and refuses
+            ; to save it; say so once for all of them.
             try manager.ReloadFromDisk()
+            catch ConfigReadError as err
+                unreadable .= "`n• " . err.Message
+            catch
+                continue
         }
+        if (unreadable != "")
+            MsgBox("⚠️ Some settings could not be read, so their tabs show the last list read and will not save changes:"
+                . unreadable . "`n`nClose the settings window and open it again. If this keeps happening, another "
+                . "program (sync, backup or antivirus) may be holding the file.", "Settings Not Read", 262192)
     }
 
     ; A catalog added to or replaced the prompts and hotstrings on disk. The

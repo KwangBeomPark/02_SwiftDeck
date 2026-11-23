@@ -52,10 +52,11 @@ MigrateHotstringIni() {
     if !ConfigExists("Hotstrings")
         return
 
-    schemaVer := "1"
-    try schemaVer := ConfigReadValue("Hotstrings", "Meta", "SchemaVersion", "1")
-
-    if (schemaVer == "4")
+    ; Every decision below comes from one strict read of the file: a file that
+    ; cannot be read raises ConfigReadError, which the startup step reports,
+    ; instead of reading as empty for some of the reads and not others.
+    state := ConfigReadStrict("Hotstrings", MigrateHotstringReadState)
+    if state.IsCurrent
         return
 
     ; The migration rewrites the whole file, so it must never run on content it
@@ -64,16 +65,14 @@ MigrateHotstringIni() {
     ; open this file — makes the legacy reader match none of the v4 section
     ; names, return zero items, and the rewrite then deletes all 37 of them
     ; without raising anything.
-    hotstringData := ConfigReadHotstringData()
-    if (ConfigCountHotstringItems(hotstringData) > 0) {
-        ConfigWriteHotstringData(hotstringData.Data, hotstringData.GroupOrder)
+    if (ConfigCountHotstringItems(state.Data) > 0) {
+        ConfigWriteHotstringData(state.Data.Data, state.Data.GroupOrder)
         return
     }
 
     ; Nothing was read. If the file is really in the current format, only the
     ; marker is missing — put it back rather than rewriting the content.
-    current := ConfigReadHotstringDataV4()
-    if (ConfigCountHotstringItems(current) > 0) {
+    if (ConfigCountHotstringItems(state.V4) > 0) {
         ConfigWriteValue("Hotstrings", "Meta", "SchemaVersion", "4")
         return
     }
@@ -81,8 +80,19 @@ MigrateHotstringIni() {
     ; Neither reader understood it, yet it holds something. Leave it alone and
     ; let the caller report it: an empty hotstring list is recoverable, a file
     ; overwritten with an empty default is not.
-    if (ConfigHasContentSections("Hotstrings"))
+    if state.HasContent
         throw Error("The hotstring settings file is not in a recognised format, so it was left unchanged.")
+}
+
+MigrateHotstringReadState() {
+    if (ConfigReadValue("Hotstrings", "Meta", "SchemaVersion", "1") == "4")
+        return { IsCurrent: true }
+    return {
+        IsCurrent: false,
+        Data: ConfigReadHotstringData(),
+        V4: ConfigReadHotstringDataV4(),
+        HasContent: ConfigHasContentSections("Hotstrings")
+    }
 }
 
 ; True when a file's bytes decode as valid UTF-8. A settings file left over from

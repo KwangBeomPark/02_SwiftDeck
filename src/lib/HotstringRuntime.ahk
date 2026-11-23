@@ -9,16 +9,18 @@
 LoadHotstrings(showFailures := true) {
     global g_registeredHotstrings
 
+    ; Read first, strictly: a file that cannot be read — held by another
+    ; program, or missing for a moment while it is replaced — raises
+    ; ConfigReadError here, while the hotstrings already running are still
+    ; registered, instead of reading as empty and switching them all off.
+    hotstringData := ConfigReadStrict("Hotstrings", ConfigReadHotstringData)
+
     for hotstringSpec in g_registeredHotstrings {
         try Hotstring(hotstringSpec, , "Off")
     }
     g_registeredHotstrings := []
 
     failedItems := []
-    if !ConfigExists("Hotstrings")
-        return failedItems
-
-    hotstringData := ConfigReadHotstringData()
 
     ; No * option: AutoHotkey checks the trigger only after an ending character.
     for entry in HotstringBuildRuntimePlan(hotstringData) {

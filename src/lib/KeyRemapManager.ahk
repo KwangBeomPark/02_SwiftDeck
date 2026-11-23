@@ -12,9 +12,25 @@ class KeyRemapManager {
     __New(parentGui := "") {
         this.parentGui := parentGui
         this.applyWarning := ""
-        this.localData := ConfigReadKeyRemaps()
+        ; readOk: the list came from a strict read, so saving it is safe.
+        ; lastGood: the list as last known to be on disk.
+        this.readOk := false
+        this.localData := []
+        this.lastGood := []
+        try this.TakeDiskData(KeyRemapManager.ReadDiskData())
         if (parentGui)
             this.BuildUI(parentGui)
+    }
+
+    ; Strict, for the settings tab: see PromptManager.ReadDiskData.
+    static ReadDiskData() {
+        return ConfigReadStrict("KeyRemaps", ConfigReadKeyRemaps)
+    }
+
+    TakeDiskData(remaps) {
+        this.localData := remaps
+        this.lastGood := ConfigCloneData(remaps)
+        this.readOk := true
     }
 
     Show() {
@@ -153,7 +169,14 @@ class KeyRemapManager {
     ; memory — so without this, edits made to the file meanwhile (App Info's
     ; Open buttons invite exactly that) are overwritten by the stale snapshot.
     ReloadFromDisk() {
-        this.localData := ConfigReadKeyRemaps()
+        ; A file that cannot be read keeps the list shown and blocks saving it;
+        ; the dashboard reports the error.
+        try remaps := KeyRemapManager.ReadDiskData()
+        catch ConfigReadError as err {
+            this.readOk := false
+            throw err
+        }
+        this.TakeDiskData(remaps)
     }
 
     RefreshList(targetIdx := 0) {
@@ -410,10 +433,23 @@ class KeyRemapManager {
     ; applyWarning for the feedback that follows.
     SaveSettings(showFeedback := true) {
         this.applyWarning := ""
+        if !this.readOk {
+            this.localData := ConfigCloneData(this.lastGood)
+            this.RefreshList()
+            ConfigReportReadBlocked()
+            return false
+        }
         try {
             ConfigWriteKeyRemaps(this.localData)
+            this.lastGood := ConfigCloneData(this.localData)
         } catch Error as err {
-            this.localData := ConfigReadKeyRemaps()
+            ; The file is unchanged: show it again, or, if it cannot be read
+            ; either, the list last known to be on it.
+            try this.TakeDiskData(KeyRemapManager.ReadDiskData())
+            catch {
+                this.localData := ConfigCloneData(this.lastGood)
+                this.readOk := false
+            }
             this.RefreshList()
             MsgBox("❌ The key mapping change could not be saved and was not applied.`n`nError: " . err.Message,
                 "Save Failed", 262160)
@@ -461,6 +497,12 @@ HasVal(arr, val) {
 LoadKeyRemaps(showFailures := true) {
     global g_registeredKeyRemaps
 
+    ; Read first, strictly: a file that cannot be read — held by another
+    ; program, or missing for a moment while it is replaced — raises
+    ; ConfigReadError here, while the mappings already running are still
+    ; registered, instead of reading as empty and switching them all off.
+    remaps := ConfigReadStrict("KeyRemaps", ConfigReadKeyRemaps)
+
     ; Unregister existing key mappings
     for srcKey in g_registeredKeyRemaps {
         try Hotkey(srcKey, "Off")
@@ -469,8 +511,6 @@ LoadKeyRemaps(showFailures := true) {
     g_registeredKeyRemaps.Clear()
 
     failedItems := []
-    if !ConfigExists("KeyRemaps")
-        return failedItems
 
     ; A settings file written before this was blocked can still hold a remap that
     ; collides with one of SwiftDeck's own shortcuts. Registering it would
@@ -479,7 +519,7 @@ LoadKeyRemaps(showFailures := true) {
     settings := ConfigGetFallbackAppSettings()
     try settings := ConfigReadAppSettings()
 
-    for item in ConfigReadKeyRemaps() {
+    for item in remaps {
         if (item.Src != "" && item.Dst != "" && FindAppHotkeyConflict(item.Src, settings) == "") {
             try {
                 if IsMouseButton(item.Dst) {

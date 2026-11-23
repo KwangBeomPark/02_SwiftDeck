@@ -15,11 +15,32 @@ class HotstringManager {
     __New(parentGui := "") {
         this.parentGui := parentGui
         this.applyWarning := ""
-        hotstringData := ConfigReadHotstringData()
-        this.localData := hotstringData.Data
-        this.groupOrder := hotstringData.GroupOrder
+        ; readOk: the groups came from a strict read, so saving them is safe.
+        ; lastGood: the groups as last known to be on disk.
+        this.readOk := false
+        this.localData := Map("Group_Space_Default", [])
+        this.groupOrder := ["Group_Space_Default"]
+        this.lastGood := { Data: ConfigCloneData(this.localData), GroupOrder: ConfigCloneData(this.groupOrder) }
+        try this.TakeDiskData(HotstringManager.ReadDiskData())
         if (parentGui)
             this.BuildUI(parentGui)
+    }
+
+    ; Strict, for the settings tab: see PromptManager.ReadDiskData.
+    static ReadDiskData() {
+        return ConfigReadStrict("Hotstrings", ConfigReadHotstringData)
+    }
+
+    TakeDiskData(hotstringData) {
+        this.localData := hotstringData.Data
+        this.groupOrder := hotstringData.GroupOrder
+        this.lastGood := { Data: ConfigCloneData(hotstringData.Data), GroupOrder: ConfigCloneData(hotstringData.GroupOrder) }
+        this.readOk := true
+    }
+
+    RestoreLastGood() {
+        this.localData := ConfigCloneData(this.lastGood.Data)
+        this.groupOrder := ConfigCloneData(this.lastGood.GroupOrder)
     }
 
     Show() {
@@ -391,9 +412,14 @@ class HotstringManager {
     ; Open buttons invite exactly that) are overwritten by the stale snapshot.
     ReloadFromDisk() {
         currentGroup := this.HasOwnProp("cbGroup") ? this.GetCurrentGroupName() : ""
-        hotstringData := ConfigReadHotstringData()
-        this.localData := hotstringData.Data
-        this.groupOrder := hotstringData.GroupOrder
+        ; A file that cannot be read keeps the groups shown and blocks saving
+        ; them; the dashboard reports the error.
+        try hotstringData := HotstringManager.ReadDiskData()
+        catch ConfigReadError as err {
+            this.readOk := false
+            throw err
+        }
+        this.TakeDiskData(hotstringData)
         if this.HasOwnProp("cbGroup")
             this.UpdateGroupsDdl(currentGroup)
     }
@@ -614,12 +640,24 @@ class HotstringManager {
     ; applyWarning for the feedback that follows.
     SaveSettings(showFeedback := true) {
         this.applyWarning := ""
+        if !this.readOk {
+            this.RestoreLastGood()
+            this.UpdateGroupsDdl(this.HasOwnProp("cbGroup") ? this.GetCurrentGroupName() : "")
+            this.RefreshList()
+            ConfigReportReadBlocked()
+            return false
+        }
         try {
             ConfigWriteHotstringData(this.localData, this.groupOrder)
+            this.lastGood := { Data: ConfigCloneData(this.localData), GroupOrder: ConfigCloneData(this.groupOrder) }
         } catch Error as err {
-            hotstringData := ConfigReadHotstringData()
-            this.localData := hotstringData.Data
-            this.groupOrder := hotstringData.GroupOrder
+            ; The file is unchanged: show it again, or, if it cannot be read
+            ; either, the groups last known to be on it.
+            try this.TakeDiskData(HotstringManager.ReadDiskData())
+            catch {
+                this.RestoreLastGood()
+                this.readOk := false
+            }
             this.UpdateGroupsDdl()
             this.RefreshList()
             MsgBox("❌ The hotstring change could not be saved and was not applied.`n`nError: " . err.Message,

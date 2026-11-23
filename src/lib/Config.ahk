@@ -1,10 +1,140 @@
 #Requires AutoHotkey v2.0
 #Include Utils.ahk
+#Include IniText.ahk
 #Include ..\SettingsManager.ahk
 ; NOTE: Global variables (g_targetFolder, g_filePath_*) are declared in SwiftDeck.ahk.
 
 ; Config name -> file read instead, set only while CatalogRead runs.
 global g_configPathOverride := ""
+; Config name -> the file's parsed text, set only while ConfigReadStrict runs.
+global g_configSnapshots := Map()
+
+; A settings file that could not be read: missing, or held by another program.
+; Raised only by ConfigReadStrict, whose callers must then keep what they have
+; instead of treating the file as empty.
+class ConfigReadError extends Error {
+}
+
+; The text of a settings file, or ConfigReadError. Sync, backup and antivirus
+; tools can hold a file for a moment, and the atomic save replaces it, so a
+; failed read is retried briefly before it counts.
+;
+; Decoded as the Windows profile functions decode it, so the parser sees what
+; IniRead and the saving IniWrite see: UTF-16 after its BOM, anything else as
+; the system ANSI code page. That includes a UTF-8 BOM, whose bytes then hide
+; the first header from Windows; reading that section here anyway would show
+; content the next save does not update. (FileRead would honour the UTF-8 BOM.)
+ConfigReadFileText(path) {
+    loop 6 {
+        try {
+            ; Opened denying writes, and read to the length the handle reports:
+            ; a program rewriting the file in place (an editor saving, a sync
+            ; tool) makes the open fail and be retried, rather than handing
+            ; back half a file that would pass for the whole list.
+            file := FileOpen(path, "r -w")
+            try {
+                size := file.Length
+                ; FileOpen skips a BOM it recognises; the bytes are decoded
+                ; below, from the start.
+                file.Pos := 0
+                raw := Buffer(size)
+                got := size ? file.RawRead(raw, size) : 0
+            } finally {
+                file.Close()
+            }
+            if (got == size) {
+                if (size >= 2 && NumGet(raw, 0, "UShort") == 0xFEFF)
+                    return StrGet(raw.Ptr + 2, (size - 2) // 2, "UTF-16")
+                return size ? StrGet(raw, size, "CP0") : ""
+            }
+        }
+        Sleep(50)
+    }
+    SplitPath(path, &fileName)
+    reason := FileExist(path) ? "it is in use by another program" : "it was not found"
+    throw ConfigReadError("The settings file " . fileName . " could not be read: " . reason . ".")
+}
+
+; Runs reader() — any of the readers below — against a single read of the
+; file's text instead of separate Windows reads, so a file that cannot be read
+; raises ConfigReadError rather than reading as empty, and a section too large
+; for Windows is read whole. Use it wherever the result is saved back or
+; replaces what is running. configNames is a name or an array of names.
+ConfigReadStrict(configNames, reader) {
+    if !(configNames is Array)
+        configNames := [configNames]
+    parsedByPath := Map()
+    parsedByName := Map()
+    for configName in configNames {
+        path := GetConfigPath(configName)
+        if !parsedByPath.Has(path)
+            parsedByPath[path] := IniParseText(ConfigReadFileText(path))
+        parsedByName[configName] := parsedByPath[path]
+    }
+    return ConfigReadParsed(parsedByName, reader)
+}
+
+; Runs reader() with the readers below serving parsedByName (config name ->
+; IniParseText result) instead of the files.
+ConfigReadParsed(parsedByName, reader) {
+    global g_configSnapshots
+    ; Under Critical, so a hotkey firing meanwhile cannot read the snapshot in
+    ; place of the file, or replace it under this reader.
+    wasCritical := A_IsCritical
+    Critical("On")
+    previous := Map()
+    for configName, parsed in parsedByName {
+        if g_configSnapshots.Has(configName)
+            previous[configName] := g_configSnapshots[configName]
+        g_configSnapshots[configName] := parsed
+    }
+    try {
+        return reader()
+    } finally {
+        for configName in parsedByName {
+            if previous.Has(configName)
+                g_configSnapshots[configName] := previous[configName]
+            else
+                g_configSnapshots.Delete(configName)
+        }
+        Critical(wasCritical ? wasCritical : "Off")
+    }
+}
+
+; A deep copy of what the readers return (Maps, Arrays and plain objects), so a
+; settings tab can keep its last list that was read intact.
+ConfigCloneData(value) {
+    if (value is Map) {
+        copy := Map()
+        copy.CaseSense := value.CaseSense
+        for key, item in value
+            copy[key] := ConfigCloneData(item)
+        return copy
+    }
+    if (value is Array) {
+        copy := []
+        for item in value
+            copy.Push(ConfigCloneData(item))
+        return copy
+    }
+    if (IsObject(value) && Type(value) == "Object") {
+        copy := {}
+        for name, item in value.OwnProps()
+            copy.%name% := ConfigCloneData(item)
+        return copy
+    }
+    return value
+}
+
+; Shown when a settings tab refuses to save because its file could not be read
+; when the tab last loaded it: what it shows may not be what is on disk, and
+; saving it would replace the file with it.
+ConfigReportReadBlocked(detail := "") {
+    MsgBox("⚠️ This list could not be read from its settings file, so the change was not saved."
+        . (detail != "" ? "`n`n" . detail : "")
+        . "`n`nClose the settings window and open it again. If this keeps happening, another "
+        . "program (sync, backup or antivirus) may be holding the file.", "Settings Not Read", 262192)
+}
 ; =============================================================================
 ; --- Config File Initialization & Management ---
 ; =============================================================================
@@ -504,6 +634,9 @@ ConfigExists(configName) {
 }
 
 ConfigReadValue(configName, section, key, defaultValue := "") {
+    global g_configSnapshots
+    if g_configSnapshots.Has(configName)
+        return IniTextReadValue(g_configSnapshots[configName], section, key, defaultValue)
     try {
         return IniRead(GetConfigPath(configName), section, key, defaultValue)
     } catch {
@@ -516,6 +649,9 @@ ConfigWriteValue(configName, section, key, value) {
 }
 
 ConfigReadSection(configName, section, defaultValue := "") {
+    global g_configSnapshots
+    if g_configSnapshots.Has(configName)
+        return IniTextReadSection(g_configSnapshots[configName], section, defaultValue)
     try {
         return IniRead(GetConfigPath(configName), section, , defaultValue)
     } catch {
@@ -531,6 +667,9 @@ ConfigDeleteSection(configName, section) {
     SettingsWriteIniValues(GetConfigPath(configName), [{Section: section, SectionText: ""}])
 }
 ConfigReadSections(configName) {
+    global g_configSnapshots
+    if g_configSnapshots.Has(configName)
+        return IniTextReadSectionNames(g_configSnapshots[configName])
     try {
         return IniRead(GetConfigPath(configName))
     } catch {
@@ -848,7 +987,8 @@ ConfigNormalizePromptSlotName(name) {
 ; Rewrites only [SlotNames], from what is on disk, so a name saved here cannot
 ; undo one changed in the file meanwhile. An empty name removes the slot's entry.
 ConfigWritePromptSlotName(slotNum, name) {
-    names := ConfigReadPromptSlotNames()
+    ; Strict: a failed read would otherwise erase every other slot's name.
+    names := ConfigReadStrict("Prompts", ConfigReadPromptSlotNames)
     names[slotNum] := ConfigNormalizePromptSlotName(name)
     ; Empty text deletes the section rather than leaving an empty header.
     ConfigWriteSection("Prompts", "SlotNames", ConfigBuildSlotNamesText(names))
@@ -896,10 +1036,23 @@ ConfigReadHotstringData() {
     return ConfigReadHotstringDataLegacy()
 }
 
+; The most groups, and items in one group, a reader will walk. The counts come
+; from the file, and one damaged number (ItemCount=999999999) would otherwise
+; keep the reader busy for minutes, under Critical in a strict read, with the
+; app unresponsive. Far above anything SwiftDeck writes; reading up to the cap
+; still finds every real entry, and the next save writes the true counts.
+ConfigGetMaxHotstringGroups() {
+    return 999
+}
+
+ConfigGetMaxHotstringItemsPerGroup() {
+    return 9999
+}
+
 ConfigReadHotstringDataV4() {
     localData := Map()
     groupOrder := []
-    groupCount := ConfigReadIntegerValue("Hotstrings", "Groups", "Count", 0)
+    groupCount := Min(ConfigReadIntegerValue("Hotstrings", "Groups", "Count", 0), ConfigGetMaxHotstringGroups())
 
     loop groupCount {
         groupNo := Format("{:03}", A_Index)
@@ -914,7 +1067,7 @@ ConfigReadHotstringDataV4() {
         localData[groupSection] := []
         groupOrder.Push(groupSection)
 
-        itemCount := ConfigReadIntegerValue("Hotstrings", groupId, "ItemCount", 0)
+        itemCount := Min(ConfigReadIntegerValue("Hotstrings", groupId, "ItemCount", 0), ConfigGetMaxHotstringItemsPerGroup())
         loop itemCount {
             itemNo := Format("{:03}", A_Index)
             triggerText := HotstringDecodeIniValue(ConfigReadValue("Hotstrings", groupId, "Item" . itemNo . "Key", ""))

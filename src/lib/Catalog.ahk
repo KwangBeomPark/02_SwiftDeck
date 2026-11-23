@@ -72,23 +72,23 @@ CatalogPreviewText(text, maxLength := 70) {
 ; Format 1 always records the current prompt encoding and hotstring schema;
 ; without them the readers would fall back to the legacy rules, which read
 ; such a file's hotstrings as none and turn "\n" in its prompts into newlines.
-CatalogReadInfo(path) {
-    try {
-        format := IniRead(path, "Catalog", "Format", "")
-        promptEncoding := IniRead(path, "Meta", "PromptEncoding", "")
-        schemaVersion := IniRead(path, "Meta", "SchemaVersion", "")
-    } catch {
-        return ""
+CatalogReadInfo(path, parsed := "") {
+    if !IsObject(parsed) {
+        try parsed := IniParseText(ConfigReadFileText(path))
+        catch
+            return ""
     }
+    format := IniTextReadValue(parsed, "Catalog", "Format", "")
+    promptEncoding := IniTextReadValue(parsed, "Meta", "PromptEncoding", "")
+    schemaVersion := IniTextReadValue(parsed, "Meta", "SchemaVersion", "")
     if !RegExMatch(format, "^\d{1,3}$") || Integer(format) < 1 || Integer(format) > CatalogGetFormatVersion()
         return ""
     if (promptEncoding != String(ConfigGetPromptEncodingVersion()) || schemaVersion != "4")
         return ""
     SplitPath(path, , , , &baseName)
     name := ""
-    created := ""
-    try name := HotstringDecodeIniValue(IniRead(path, "Catalog", "Name", ""))
-    try created := IniRead(path, "Catalog", "Created", "")
+    try name := HotstringDecodeIniValue(IniTextReadValue(parsed, "Catalog", "Name", ""))
+    created := IniTextReadValue(parsed, "Catalog", "Created", "")
     return { Path: path, Name: (Trim(name) != "") ? Trim(name) : baseName, Created: created }
 }
 
@@ -120,22 +120,26 @@ CatalogList(folder := "") {
 ; Reads a catalog with the same readers as the live settings:
 ; { Info, Prompts, SlotNames, Hotstrings }. The readers are pointed at the file
 ; only while this runs, under Critical, so a hotkey that fires meanwhile cannot
-; read the catalog in place of the user's own settings.
+; read the catalog in place of the user's own settings. The header, the size
+; check and the content all come from one read of the file, so they cannot
+; disagree, and a file that cannot be read raises ConfigReadError.
 CatalogRead(path) {
     global g_configPathOverride
-    info := CatalogReadInfo(path)
+    parsed := IniParseText(ConfigReadFileText(path))
+    info := CatalogReadInfo(path, parsed)
     if (info == "")
         throw Error("This file is not a SwiftDeck catalog, or it needs a newer SwiftDeck:`n" . path)
-    CatalogCheckSize(path)
+    CatalogCheckSize(parsed)
     wasCritical := A_IsCritical
     Critical("On")
     g_configPathOverride := Map("Prompts", path, "Hotstrings", path)
     try {
+        content := ConfigReadParsed(Map("Prompts", parsed, "Hotstrings", parsed), CatalogReadSettingsNow)
         catalog := {
             Info: info,
-            Prompts: ConfigReadPromptData(),
-            SlotNames: ConfigReadPromptSlotNames(),
-            Hotstrings: ConfigReadHotstringData()
+            Prompts: content.Prompts,
+            SlotNames: content.SlotNames,
+            Hotstrings: content.Hotstrings
         }
     } finally {
         g_configPathOverride := ""
@@ -146,15 +150,15 @@ CatalogRead(path) {
 }
 
 ; Refuses counts no real catalog has, before anything loops over them.
-CatalogCheckSize(path) {
-    groupCount := IniRead(path, "Groups", "Count", "0")
+CatalogCheckSize(parsed) {
+    groupCount := IniTextReadValue(parsed, "Groups", "Count", "0")
     if !RegExMatch(groupCount, "^\d{1,4}$") || Integer(groupCount) > CatalogGetMaxGroups()
         throw Error("This catalog lists more hotstring groups than SwiftDeck reads (" . CatalogGetMaxGroups() . ").")
     total := 0
     loop Integer(groupCount) {
         groupNo := Format("{:03}", A_Index)
-        groupId := IniRead(path, "Groups", "Group" . groupNo . "Id", "Group" . groupNo)
-        itemCount := IniRead(path, groupId, "ItemCount", "0")
+        groupId := IniTextReadValue(parsed, "Groups", "Group" . groupNo . "Id", "Group" . groupNo)
+        itemCount := IniTextReadValue(parsed, groupId, "ItemCount", "0")
         if !RegExMatch(itemCount, "^\d{1,5}$")
             throw Error("This catalog has an unreadable hotstring count in " . groupId . ".")
         total += Integer(itemCount)
@@ -204,8 +208,22 @@ CatalogSaveCurrent(name) {
             break
         finalName := name . " (" . (A_Index + 1) . ")"
     }
-    CatalogWrite(path, finalName, ConfigReadPromptData(), ConfigReadPromptSlotNames(), ConfigReadHotstringData())
+    current := CatalogReadCurrentSettings()
+    CatalogWrite(path, finalName, current.Prompts, current.SlotNames, current.Hotstrings)
     return { Path: path, Name: finalName }
+}
+
+; Prompts, slot names and hotstrings from whatever the readers point at: the
+; user's files, or a catalog while CatalogRead redirects them.
+CatalogReadSettingsNow() {
+    return { Prompts: ConfigReadPromptData(), SlotNames: ConfigReadPromptSlotNames(), Hotstrings: ConfigReadHotstringData() }
+}
+
+; The user's own prompts, slot names and hotstrings, read strictly: a file that
+; cannot be read raises ConfigReadError instead of passing for empty, which a
+; backup, an add or a switch would then save.
+CatalogReadCurrentSettings() {
+    return ConfigReadStrict(["Prompts", "Hotstrings"], CatalogReadSettingsNow)
 }
 
 ; Where an imported file is kept: its own name, with the catalog extension.

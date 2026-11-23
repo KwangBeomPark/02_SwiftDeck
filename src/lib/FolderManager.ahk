@@ -17,8 +17,18 @@ class FolderManager {
         ConfigWriteFolderItems(items)
     }
 
+    ; Strict, for the settings tab: see PromptManager.ReadDiskData.
+    static ReadDiskData() {
+        return ConfigReadStrict("Folders", ConfigReadFolderItems)
+    }
+
     __New(parentGui := "") {
-        this.orderedItems := FolderManager.ReadFolderItems()
+        ; readOk: the list came from a strict read, so saving it is safe.
+        ; lastGood: the list as last known to be on disk.
+        this.readOk := false
+        this.orderedItems := []
+        this.lastGood := []
+        try this.TakeDiskData(FolderManager.ReadDiskData())
         this.parentGui := parentGui
         if (parentGui)
             this.BuildUI(parentGui)
@@ -108,8 +118,21 @@ class FolderManager {
     }
 
     ReloadFromDisk() {
-        this.orderedItems := FolderManager.ReadFolderItems()
         this.UpdateHotkeyHint()
+        ; A file that cannot be read keeps the list shown and blocks saving it;
+        ; the dashboard reports the error.
+        try items := FolderManager.ReadDiskData()
+        catch ConfigReadError as err {
+            this.readOk := false
+            throw err
+        }
+        this.TakeDiskData(items)
+    }
+
+    TakeDiskData(items) {
+        this.orderedItems := items
+        this.lastGood := ConfigCloneData(items)
+        this.readOk := true
     }
 
     RefreshList(targetIdx := 0) {
@@ -321,8 +344,15 @@ class FolderManager {
 
     SaveSettings(showFeedback := true) {
         global g_FolderMenuCache, g_FolderProbeFailures
+        if !this.readOk {
+            this.orderedItems := ConfigCloneData(this.lastGood)
+            this.RefreshList()
+            ConfigReportReadBlocked()
+            return false
+        }
         try {
             FolderManager.WriteFolderItems(this.orderedItems)
+            this.lastGood := ConfigCloneData(this.orderedItems)
             if IsSet(g_FolderMenuCache) && (g_FolderMenuCache is Map)
                 g_FolderMenuCache.Clear()
             if IsSet(g_FolderProbeFailures) && (g_FolderProbeFailures is Map)
@@ -331,7 +361,13 @@ class FolderManager {
                 this.ShowAutoSaveFeedback()
             return true
         } catch Error as err {
-            this.orderedItems := FolderManager.ReadFolderItems()
+            ; The file is unchanged: show it again, or, if it cannot be read
+            ; either, the list last known to be on it.
+            try this.TakeDiskData(FolderManager.ReadDiskData())
+            catch {
+                this.orderedItems := ConfigCloneData(this.lastGood)
+                this.readOk := false
+            }
             this.RefreshList()
             MsgBox("❌ The folder change could not be saved and was not applied.`n`nError: " . err.Message,
                 "Save Failed", 262160)

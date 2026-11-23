@@ -105,10 +105,31 @@ class PromptManager {
     __New(parentGui := "") {
         this.parentGui := parentGui
         this.isEditingPopup := false
-        this.localData := ConfigReadPromptData()
-        this.slotNames := ConfigReadPromptSlotNames()
+        ; readOk: the list came from a strict read, so saving it is safe.
+        ; lastGood: the list as last known to be on disk, put back when a save
+        ; is refused or fails.
+        this.readOk := false
+        this.localData := Map()
+        loop 10
+            this.localData[A_Index - 1] := []
+        this.lastGood := ConfigCloneData(this.localData)
+        this.slotNames := ""
+        try this.TakeDiskData(PromptManager.ReadDiskData())
+        if !IsObject(this.slotNames)
+            this.slotNames := ConfigReadPromptSlotNames()
         if (parentGui)
             this.BuildUI(parentGui)
+    }
+
+    static ReadDiskData() {
+        return ConfigReadStrict("Prompts", () => { Prompts: ConfigReadPromptData(), Names: ConfigReadPromptSlotNames() })
+    }
+
+    TakeDiskData(data) {
+        this.localData := data.Prompts
+        this.slotNames := data.Names
+        this.lastGood := ConfigCloneData(data.Prompts)
+        this.readOk := true
     }
 
     Show() {
@@ -376,14 +397,19 @@ class PromptManager {
             ; copy in memory is the one the window opened with, and saving it
             ; would overwrite all ten slots, losing anything changed in the
             ; file meanwhile (App Info's Open buttons, a synced copy).
-            try latest := ConfigReadPromptData()
+            ; Strict: a file that cannot be read must not pass for empty slots,
+            ; which an added prompt would then be saved over.
+            try latest := ConfigReadStrict("Prompts", ConfigReadPromptData)
             catch Error as err {
                 MsgBox("❌ The prompt file could not be read, so nothing was saved.`n`nError: " . err.Message,
                     "Save Failed", 262160)
                 return
             }
+            onDisk := ConfigCloneData(latest)
             if !PromptApplyEdit(latest, currNum, targetNum, isEdit, editIdx, origTitle, origMsg, t, m) {
                 this.localData := latest
+                this.lastGood := onDisk
+                this.readOk := true
                 this.RefreshList()
                 MsgBox("⚠️ This prompt was changed outside this window while you were editing. Close and reopen it before saving.",
                     "Prompt List Changed", 262192)
@@ -401,6 +427,8 @@ class PromptManager {
 
             movedSlot := (targetNum != currNum)
             this.localData := latest
+            this.lastGood := onDisk
+            this.readOk := true
             if !this.SaveSettings(false)
                 return
             if (movedSlot) {
@@ -444,8 +472,14 @@ class PromptManager {
     ReloadFromDisk() {
         if this.isEditingPopup
             return
-        this.localData := ConfigReadPromptData()
-        this.slotNames := ConfigReadPromptSlotNames()
+        ; A file that cannot be read keeps the list shown and blocks saving it;
+        ; the dashboard reports the error.
+        try data := PromptManager.ReadDiskData()
+        catch ConfigReadError as err {
+            this.readOk := false
+            throw err
+        }
+        this.TakeDiskData(data)
         this.UpdateSlotHeader()
         if this.HasOwnProp("ddlNumpad")
             this.UpdateSlotChoices()
@@ -588,17 +622,32 @@ class PromptManager {
     }
 
     SaveSettings(showFeedback := true) {
+        if !this.readOk {
+            this.localData := ConfigCloneData(this.lastGood)
+            this.RefreshList()
+            ConfigReportReadBlocked()
+            return false
+        }
         try {
             ConfigWritePromptData(this.localData)
             ; Keep the copy in memory equal to what the file reads back. A save
             ; does not round-trip text exactly (CRLF, outer whitespace), and the
             ; edit popup compares the file against this copy before saving.
-            try this.localData := ConfigReadPromptData()
+            try this.localData := ConfigReadStrict("Prompts", ConfigReadPromptData)
+            this.lastGood := ConfigCloneData(this.localData)
             if showFeedback
                 this.ShowAutoSaveFeedback()
             return true
         } catch Error as err {
-            this.localData := ConfigReadPromptData()
+            ; The file is unchanged: show it again, or, if it cannot be read
+            ; either, the list last known to be on it.
+            try {
+                this.localData := ConfigReadStrict("Prompts", ConfigReadPromptData)
+                this.lastGood := ConfigCloneData(this.localData)
+            } catch {
+                this.localData := ConfigCloneData(this.lastGood)
+                this.readOk := false
+            }
             this.RefreshList()
             MsgBox("❌ The prompt change could not be saved and was not applied.`n`nError: " . err.Message,
                 "Save Failed", 262160)
