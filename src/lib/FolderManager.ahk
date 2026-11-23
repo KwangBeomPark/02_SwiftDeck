@@ -13,13 +13,13 @@ class FolderManager {
         return ConfigReadFolderItems()
     }
 
-    static WriteFolderItems(items) {
-        ConfigWriteFolderItems(items)
+    static WriteFolderItems(items, expectedFingerprint := "") {
+        return ConfigWriteFolderItems(items, expectedFingerprint)
     }
 
     ; Strict, for the settings tab: see PromptManager.ReadDiskData.
     static ReadDiskData() {
-        return ConfigReadStrict("Folders", ConfigReadFolderItems)
+        return ConfigReadForSave("Folders", ConfigReadFolderItems)
     }
 
     __New(parentGui := "") {
@@ -28,6 +28,10 @@ class FolderManager {
         this.readOk := false
         this.orderedItems := []
         this.lastGood := []
+        this.diskFingerprint := ""
+        ; While the edit popup is open, a reload would renumber the rows it
+        ; refers to; the save it makes is then checked against the old read.
+        this.isEditingPopup := false
         try this.TakeDiskData(FolderManager.ReadDiskData())
         this.parentGui := parentGui
         if (parentGui)
@@ -119,19 +123,24 @@ class FolderManager {
 
     ReloadFromDisk() {
         this.UpdateHotkeyHint()
+        if this.isEditingPopup
+            return
         ; A file that cannot be read keeps the list shown and blocks saving it;
         ; the dashboard reports the error.
-        try items := FolderManager.ReadDiskData()
+        try result := FolderManager.ReadDiskData()
         catch ConfigReadError as err {
             this.readOk := false
             throw err
         }
-        this.TakeDiskData(items)
+        this.TakeDiskData(result)
     }
 
-    TakeDiskData(items) {
-        this.orderedItems := items
-        this.lastGood := ConfigCloneData(items)
+    ; result: { Data, Fingerprint } from ReadDiskData. diskFingerprint is what
+    ; the next save passes on, to be refused if the file holds another list.
+    TakeDiskData(result) {
+        this.orderedItems := result.Data
+        this.lastGood := ConfigCloneData(result.Data)
+        this.diskFingerprint := result.Fingerprint
         this.readOk := true
     }
 
@@ -223,10 +232,12 @@ class FolderManager {
             return
         }
 
+        this.isEditingPopup := true
         WinSetEnabled(0, this.mainHwnd)
         popup := Gui("+AlwaysOnTop +Owner" . this.mainHwnd . " -MinimizeBox -MaximizeBox", "Edit Folder")
 
         CleanUpAndClose() {
+            this.isEditingPopup := false
             WinSetEnabled(1, this.mainHwnd)
             WinActivate(this.mainHwnd)
             popup.Destroy()
@@ -274,8 +285,13 @@ class FolderManager {
             this.orderedItems[idx].Name := n
             this.orderedItems[idx].Path := p
 
-            if !this.SaveSettings(false)
+            if !this.SaveSettings(false) {
+                ; Refused because the file changed: the list was read again,
+                ; and this popup's row number may now be another entry's.
+                if this.saveConflict
+                    CleanUpAndClose()
                 return
+            }
             this.RefreshList(idx)
             CleanUpAndClose()
             this.ShowAutoSaveFeedback("✅ Folder saved and applied")
@@ -344,6 +360,8 @@ class FolderManager {
 
     SaveSettings(showFeedback := true) {
         global g_FolderMenuCache, g_FolderProbeFailures
+        ; saveConflict: the last save was refused because the file changed.
+        this.saveConflict := false
         if !this.readOk {
             this.orderedItems := ConfigCloneData(this.lastGood)
             this.RefreshList()
@@ -351,28 +369,42 @@ class FolderManager {
             return false
         }
         try {
-            FolderManager.WriteFolderItems(this.orderedItems)
-            this.lastGood := ConfigCloneData(this.orderedItems)
-            if IsSet(g_FolderMenuCache) && (g_FolderMenuCache is Map)
-                g_FolderMenuCache.Clear()
-            if IsSet(g_FolderProbeFailures) && (g_FolderProbeFailures is Map)
-                g_FolderProbeFailures.Clear()
-            if showFeedback
-                this.ShowAutoSaveFeedback()
-            return true
+            written := FolderManager.WriteFolderItems(this.orderedItems, this.diskFingerprint)
         } catch Error as err {
-            ; The file is unchanged: show it again, or, if it cannot be read
-            ; either, the list last known to be on it.
+            ; The file is unchanged by this save: show it as it is now, or, if
+            ; it cannot be read either, the list last known to be on it.
+            ; Whatever failed, a list that reads differently now counts as a
+            ; conflict, so an edit popup does not keep a stale row number.
+            previousFingerprint := this.diskFingerprint
+            reloaded := true
             try this.TakeDiskData(FolderManager.ReadDiskData())
             catch {
+                reloaded := false
                 this.orderedItems := ConfigCloneData(this.lastGood)
                 this.readOk := false
             }
+            this.saveConflict := (err is ConfigChangedError) || (reloaded && this.diskFingerprint !== previousFingerprint)
             this.RefreshList()
-            MsgBox("❌ The folder change could not be saved and was not applied.`n`nError: " . err.Message,
-                "Save Failed", 262160)
+            if (reloaded && this.saveConflict)
+                ConfigReportChangedOutside()
+            else
+                MsgBox("❌ The folder change could not be saved and was not applied.`n`nError: " . err.Message,
+                    "Save Failed", 262160)
             return false
         }
+        ; What the file now holds, from the copy that became it: reading the
+        ; file again could take a change made since for this save's own. The
+        ; list on screen becomes what was written, which can differ slightly.
+        try this.orderedItems := ConfigReadParsed(Map("Folders", written.Parsed), ConfigReadFolderItems)
+        this.lastGood := ConfigCloneData(this.orderedItems)
+        this.diskFingerprint := written.Fingerprint
+        if IsSet(g_FolderMenuCache) && (g_FolderMenuCache is Map)
+            g_FolderMenuCache.Clear()
+        if IsSet(g_FolderProbeFailures) && (g_FolderProbeFailures is Map)
+            g_FolderProbeFailures.Clear()
+        if showFeedback
+            this.ShowAutoSaveFeedback()
+        return true
     }
 
     ShowAutoSaveFeedback(message := "✅ Saved and applied") {

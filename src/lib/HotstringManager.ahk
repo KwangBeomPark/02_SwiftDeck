@@ -21,6 +21,10 @@ class HotstringManager {
         this.localData := Map("Group_Space_Default", [])
         this.groupOrder := ["Group_Space_Default"]
         this.lastGood := { Data: ConfigCloneData(this.localData), GroupOrder: ConfigCloneData(this.groupOrder) }
+        this.diskFingerprint := ""
+        ; While a popup is open, a reload would renumber the rows and groups it
+        ; refers to; the save it makes is then checked against the old read.
+        this.isEditingPopup := false
         try this.TakeDiskData(HotstringManager.ReadDiskData())
         if (parentGui)
             this.BuildUI(parentGui)
@@ -28,13 +32,17 @@ class HotstringManager {
 
     ; Strict, for the settings tab: see PromptManager.ReadDiskData.
     static ReadDiskData() {
-        return ConfigReadStrict("Hotstrings", ConfigReadHotstringData)
+        return ConfigReadForSave("Hotstrings", ConfigReadHotstringData)
     }
 
-    TakeDiskData(hotstringData) {
-        this.localData := hotstringData.Data
-        this.groupOrder := hotstringData.GroupOrder
-        this.lastGood := { Data: ConfigCloneData(hotstringData.Data), GroupOrder: ConfigCloneData(hotstringData.GroupOrder) }
+    ; result: { Data: { Data, GroupOrder }, Fingerprint } from ReadDiskData.
+    ; diskFingerprint is what the next save passes on, to be refused if the
+    ; file holds other groups by then.
+    TakeDiskData(result) {
+        this.localData := result.Data.Data
+        this.groupOrder := result.Data.GroupOrder
+        this.lastGood := { Data: ConfigCloneData(result.Data.Data), GroupOrder: ConfigCloneData(result.Data.GroupOrder) }
+        this.diskFingerprint := result.Fingerprint
         this.readOk := true
     }
 
@@ -129,10 +137,12 @@ class HotstringManager {
     ; Group Manager Popup — Add, Rename, Delete, Reorder groups in one place
     ; =========================================================================
     ShowGroupManagerPopup() {
+        this.isEditingPopup := true
         WinSetEnabled(0, this.mainHwnd)
         popup := Gui("+AlwaysOnTop +Owner" . this.mainHwnd . " -MinimizeBox -MaximizeBox", "Manage Groups")
 
         CleanUpAndClose() {
+            this.isEditingPopup := false
             WinSetEnabled(1, this.mainHwnd)
             WinActivate(this.mainHwnd)
             popup.Destroy()
@@ -213,13 +223,13 @@ class HotstringManager {
             groupSection := (isMenuOnly ? "Group_Menu_" : "Group_Space_") . groupName
             this.localData[groupSection] := []
             this.groupOrder.Push(groupSection)
-            this.UpdateGroupsDdl(groupName)
-            this.RefreshList(0)
-            RefreshGroupList(groupName)
             if !this.SaveSettings(false) {
                 RefreshGroupList()
                 return
             }
+            this.UpdateGroupsDdl(groupName)
+            this.RefreshList(0)
+            RefreshGroupList(groupName)
             this.ShowAutoSaveFeedback("✅ Group '" . groupName . "' saved")
         }
 
@@ -256,13 +266,13 @@ class HotstringManager {
             }
             this.groupOrder[selectedIndex] := newSection
 
-            this.UpdateGroupsDdl(newName)
-            this.RefreshList(0)
-            RefreshGroupList(newName)
             if !this.SaveSettings(false) {
                 RefreshGroupList()
                 return
             }
+            this.UpdateGroupsDdl(newName)
+            this.RefreshList(0)
+            RefreshGroupList(newName)
             this.ShowAutoSaveFeedback("✅ Group renamed and applied")
         }
 
@@ -284,13 +294,13 @@ class HotstringManager {
             if (this.localData.Has(groupSection))
                 this.localData.Delete(groupSection)
             this.groupOrder.RemoveAt(selectedIndex)
-            this.UpdateGroupsDdl()
-            this.RefreshList(0)
-            RefreshGroupList()
             if !this.SaveSettings(false) {
                 RefreshGroupList()
                 return
             }
+            this.UpdateGroupsDdl()
+            this.RefreshList(0)
+            RefreshGroupList()
             this.ShowAutoSaveFeedback("✅ Group '" . groupName . "' deleted")
         }
 
@@ -311,7 +321,10 @@ class HotstringManager {
                 RefreshGroupList()
                 return
             }
+            ; Choose does not raise the change event: show the chosen group's
+            ; entries too, or the rows on screen belong to another group.
             this.UpdateGroupsDdl(groupName)
+            this.RefreshList(0)
             RefreshGroupList(groupName)
             this.ShowAutoSaveFeedback()
         }
@@ -411,15 +424,17 @@ class HotstringManager {
     ; memory — so without this, edits made to the file meanwhile (App Info's
     ; Open buttons invite exactly that) are overwritten by the stale snapshot.
     ReloadFromDisk() {
+        if this.isEditingPopup
+            return
         currentGroup := this.HasOwnProp("cbGroup") ? this.GetCurrentGroupName() : ""
         ; A file that cannot be read keeps the groups shown and blocks saving
         ; them; the dashboard reports the error.
-        try hotstringData := HotstringManager.ReadDiskData()
+        try result := HotstringManager.ReadDiskData()
         catch ConfigReadError as err {
             this.readOk := false
             throw err
         }
-        this.TakeDiskData(hotstringData)
+        this.TakeDiskData(result)
         if this.HasOwnProp("cbGroup")
             this.UpdateGroupsDdl(currentGroup)
     }
@@ -480,10 +495,12 @@ class HotstringManager {
 
     ShowEditPopup(isEdit := false, editIdx := 0) {
         groupSection := this.GetCurrentSection()
+        this.isEditingPopup := true
         WinSetEnabled(0, this.mainHwnd)
         popup := Gui("+AlwaysOnTop +Owner" . this.mainHwnd . " -MinimizeBox -MaximizeBox", isEdit ? "Edit Hotstring" : "Add Hotstring")
 
         CleanUpAndClose() {
+            this.isEditingPopup := false
             WinSetEnabled(1, this.mainHwnd)
             WinActivate(this.mainHwnd)
             popup.Destroy()
@@ -591,8 +608,14 @@ class HotstringManager {
                 this.localData[groupSection].Push({ Key: triggerText, Val: replacementText, Mode: triggerMode })
             }
 
-            if !this.SaveSettings(false)
+            if !this.SaveSettings(false) {
+                ; The list was read again and differs: an edit's row number
+                ; may now be another entry's. A new entry has none, so its
+                ; popup stays open with the text typed.
+                if (this.saveConflict && isEdit)
+                    CleanUpAndClose()
                 return
+            }
             this.UpdateGroupsDdl(this.GetCurrentGroupName())
             this.RefreshList(isEdit ? editIdx : this.localData[groupSection].Length)
             CleanUpAndClose()
@@ -640,6 +663,8 @@ class HotstringManager {
     ; applyWarning for the feedback that follows.
     SaveSettings(showFeedback := true) {
         this.applyWarning := ""
+        ; saveConflict: the last save was refused because the file changed.
+        this.saveConflict := false
         if !this.readOk {
             this.RestoreLastGood()
             this.UpdateGroupsDdl(this.HasOwnProp("cbGroup") ? this.GetCurrentGroupName() : "")
@@ -647,23 +672,48 @@ class HotstringManager {
             ConfigReportReadBlocked()
             return false
         }
+        ; The writer stores a Default group when none is left; keep the groups
+        ; on screen the same as what is written.
+        if (this.groupOrder.Length == 0) {
+            this.localData["Group_Space_Default"] := []
+            this.groupOrder.Push("Group_Space_Default")
+        }
         try {
-            ConfigWriteHotstringData(this.localData, this.groupOrder)
-            this.lastGood := { Data: ConfigCloneData(this.localData), GroupOrder: ConfigCloneData(this.groupOrder) }
+            written := ConfigWriteHotstringData(this.localData, this.groupOrder, this.diskFingerprint)
         } catch Error as err {
-            ; The file is unchanged: show it again, or, if it cannot be read
-            ; either, the groups last known to be on it.
+            ; The file is unchanged by this save: show it as it is now, or, if
+            ; it cannot be read either, the groups last known to be on it.
+            ; Whatever failed, a list that reads differently now counts as a
+            ; conflict, so an edit popup does not keep a stale row number.
+            currentGroup := this.HasOwnProp("cbGroup") ? this.GetCurrentGroupName() : ""
+            previousFingerprint := this.diskFingerprint
+            reloaded := true
             try this.TakeDiskData(HotstringManager.ReadDiskData())
             catch {
+                reloaded := false
                 this.RestoreLastGood()
                 this.readOk := false
             }
-            this.UpdateGroupsDdl()
+            this.saveConflict := (err is ConfigChangedError) || (reloaded && this.diskFingerprint !== previousFingerprint)
+            this.UpdateGroupsDdl(currentGroup)
             this.RefreshList()
-            MsgBox("❌ The hotstring change could not be saved and was not applied.`n`nError: " . err.Message,
-                "Save Failed", 262160)
+            if (reloaded && this.saveConflict)
+                ConfigReportChangedOutside()
+            else
+                MsgBox("❌ The hotstring change could not be saved and was not applied.`n`nError: " . err.Message,
+                    "Save Failed", 262160)
             return false
         }
+        ; What the file now holds, from the copy that became it: reading the
+        ; file again could take a change made since for this save's own. The
+        ; groups on screen become what was written, which can differ slightly.
+        try {
+            stored := ConfigReadParsed(Map("Hotstrings", written.Parsed), ConfigReadHotstringData)
+            this.localData := stored.Data
+            this.groupOrder := stored.GroupOrder
+        }
+        this.lastGood := { Data: ConfigCloneData(this.localData), GroupOrder: ConfigCloneData(this.groupOrder) }
+        this.diskFingerprint := written.Fingerprint
 
         try {
             failedItems := LoadHotstrings(false)

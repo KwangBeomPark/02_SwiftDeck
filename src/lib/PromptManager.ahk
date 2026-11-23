@@ -109,6 +109,8 @@ class PromptManager {
         ; lastGood: the list as last known to be on disk, put back when a save
         ; is refused or fails.
         this.readOk := false
+        this.diskFingerprint := ""
+        this.diskEncoding := ""
         this.localData := Map()
         loop 10
             this.localData[A_Index - 1] := []
@@ -121,14 +123,22 @@ class PromptManager {
             this.BuildUI(parentGui)
     }
 
+    ; { Data: { Prompts, Names, Encoding }, Fingerprint } from one strict read.
     static ReadDiskData() {
-        return ConfigReadStrict("Prompts", () => { Prompts: ConfigReadPromptData(), Names: ConfigReadPromptSlotNames() })
+        return ConfigReadForSave("Prompts", () => {
+            Prompts: ConfigReadPromptData(), Names: ConfigReadPromptSlotNames(), Encoding: ConfigReadPromptEncodingVersion()
+        })
     }
 
-    TakeDiskData(data) {
-        this.localData := data.Prompts
-        this.slotNames := data.Names
-        this.lastGood := ConfigCloneData(data.Prompts)
+    ; diskFingerprint: the slots as this read found them. A save passes it on
+    ; and is refused if the file holds other slots by then. diskEncoding: how
+    ; that read decoded them, which the edit popup checks before merging.
+    TakeDiskData(result) {
+        this.localData := result.Data.Prompts
+        this.slotNames := result.Data.Names
+        this.lastGood := ConfigCloneData(result.Data.Prompts)
+        this.diskFingerprint := result.Fingerprint
+        this.diskEncoding := result.Data.Encoding
         this.readOk := true
     }
 
@@ -399,16 +409,30 @@ class PromptManager {
             ; file meanwhile (App Info's Open buttons, a synced copy).
             ; Strict: a file that cannot be read must not pass for empty slots,
             ; which an added prompt would then be saved over.
-            try latest := ConfigReadStrict("Prompts", ConfigReadPromptData)
+            try read := PromptManager.ReadDiskData()
             catch Error as err {
                 MsgBox("❌ The prompt file could not be read, so nothing was saved.`n`nError: " . err.Message,
                     "Save Failed", 262160)
                 return
             }
+            ; The file now stores prompts another way than when this tab read
+            ; it: merging into it would save every slot read the other way.
+            if (this.diskEncoding != "" && read.Data.Encoding != this.diskEncoding) {
+                this.TakeDiskData(read)
+                this.UpdateSlotChoices()
+                this.RefreshList()
+                ConfigReportChangedOutside()
+                return
+            }
+            latest := read.Data.Prompts
             onDisk := ConfigCloneData(latest)
+            this.slotNames := read.Data.Names
+            this.diskEncoding := read.Data.Encoding
+            this.UpdateSlotChoices()
             if !PromptApplyEdit(latest, currNum, targetNum, isEdit, editIdx, origTitle, origMsg, t, m) {
                 this.localData := latest
                 this.lastGood := onDisk
+                this.diskFingerprint := read.Fingerprint
                 this.readOk := true
                 this.RefreshList()
                 MsgBox("⚠️ This prompt was changed outside this window while you were editing. Close and reopen it before saving.",
@@ -428,6 +452,7 @@ class PromptManager {
             movedSlot := (targetNum != currNum)
             this.localData := latest
             this.lastGood := onDisk
+            this.diskFingerprint := read.Fingerprint
             this.readOk := true
             if !this.SaveSettings(false)
                 return
@@ -629,30 +654,44 @@ class PromptManager {
             return false
         }
         try {
-            ConfigWritePromptData(this.localData)
-            ; Keep the copy in memory equal to what the file reads back. A save
-            ; does not round-trip text exactly (CRLF, outer whitespace), and the
-            ; edit popup compares the file against this copy before saving.
-            try this.localData := ConfigReadStrict("Prompts", ConfigReadPromptData)
-            this.lastGood := ConfigCloneData(this.localData)
-            if showFeedback
-                this.ShowAutoSaveFeedback()
-            return true
+            written := ConfigWritePromptData(this.localData, , this.diskFingerprint)
         } catch Error as err {
-            ; The file is unchanged: show it again, or, if it cannot be read
-            ; either, the list last known to be on it.
-            try {
-                this.localData := ConfigReadStrict("Prompts", ConfigReadPromptData)
-                this.lastGood := ConfigCloneData(this.localData)
-            } catch {
+            ; The file is unchanged by this save: show it as it is now, or, if
+            ; it cannot be read either, the list last known to be on it.
+            previousFingerprint := this.diskFingerprint
+            reloaded := true
+            try this.TakeDiskData(PromptManager.ReadDiskData())
+            catch {
+                reloaded := false
                 this.localData := ConfigCloneData(this.lastGood)
                 this.readOk := false
             }
+            if (reloaded && this.HasOwnProp("ddlNumpad"))
+                this.UpdateSlotChoices()
             this.RefreshList()
-            MsgBox("❌ The prompt change could not be saved and was not applied.`n`nError: " . err.Message,
-                "Save Failed", 262160)
+            if (reloaded && (err is ConfigChangedError || this.diskFingerprint !== previousFingerprint))
+                ConfigReportChangedOutside()
+            else
+                MsgBox("❌ The prompt change could not be saved and was not applied.`n`nError: " . err.Message,
+                    "Save Failed", 262160)
             return false
         }
+        ; Keep the copy in memory equal to what the file reads back — a save
+        ; does not round-trip text exactly (CRLF, outer whitespace), and the
+        ; edit popup compares the file against this copy — taken from the
+        ; copy that became the file: reading the file again could take a
+        ; change made since for this save's own.
+        try {
+            stored := ConfigReadParsed(Map("Prompts", written.Parsed), () => { Prompts: ConfigReadPromptData(), Encoding: ConfigReadPromptEncodingVersion() })
+            this.localData := stored.Prompts
+            ; A legacy file is stored in the current encoding by this save.
+            this.diskEncoding := stored.Encoding
+        }
+        this.lastGood := ConfigCloneData(this.localData)
+        this.diskFingerprint := written.Fingerprint
+        if showFeedback
+            this.ShowAutoSaveFeedback()
+        return true
     }
 
     ShowAutoSaveFeedback(message := "✅ Saved and applied") {

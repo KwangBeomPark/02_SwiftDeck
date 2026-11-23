@@ -8,6 +8,7 @@
 | 설정 저장 | `src/SettingsManager.ahk`, `src/AtomicSettings.ahk`: 새 설정 우선 → 누락된 레지스트리 설정 1회 복사 → 임시 파일 검증·원자적 교체(프롬프트·Hotstring 저장은 `SettingsWriteIniValues`로 파일 전체를 한 번에 교체) |
 | 설정·복구 | `src/lib/Config.ahk`: 기존 Roaming INI 원본 보존·검증 복사, 다섯 INI 관리, 저장·백업·복원 |
 | 엄격한 설정 읽기 | `src/lib/IniText.ahk`(Windows와 같은 규칙의 INI 해석), `Config.ahk`의 `ConfigReadStrict`: 원문을 한 번 읽어 해석 → 기존 읽기 함수가 그 결과를 읽음 → 파일 잠김·없음은 `ConfigReadError`. 저장에 쓰는 읽기와 Hotstring·키 리매핑 재등록이 사용하고, 설정 탭은 읽지 못하면 저장하지 않음 |
+| 오래된 목록 저장 방지 | `Config.ahk`의 `ConfigReadForSave`(데이터 + 그 저장이 다시 쓰는 섹션의 지문), `ConfigCheckUnchanged` → `SettingsWriteIniValues`의 `verifyBase`가 복사본과 교체 직전 원본을 지문과 비교 → 다르거나 파일이 사라졌으면 `ConfigChangedError`로 거부, 탭은 다시 읽어 안내 |
 | 앱 설정 | `src/lib/PreferencesManager.ahk`, `DashboardManager.ahk`: General 변경 → Apply → 단일 config.ini 저장 |
 | 즐겨찾기·프롬프트 | `FolderManager.ahk`, `PromptManager.ahk`: 메뉴 편집 → Config 게이트 → 파일 저장 |
 | 텍스트 확장·키 리매핑 | `HotstringManager.ahk`, `KeyRemapManager.ahk`: 편집 → INI 저장 → 단축 동작 재등록 |

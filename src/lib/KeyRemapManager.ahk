@@ -17,6 +17,10 @@ class KeyRemapManager {
         this.readOk := false
         this.localData := []
         this.lastGood := []
+        this.diskFingerprint := ""
+        ; While the edit popup is open, a reload would renumber the rows it
+        ; refers to; the save it makes is then checked against the old read.
+        this.isEditingPopup := false
         try this.TakeDiskData(KeyRemapManager.ReadDiskData())
         if (parentGui)
             this.BuildUI(parentGui)
@@ -24,12 +28,15 @@ class KeyRemapManager {
 
     ; Strict, for the settings tab: see PromptManager.ReadDiskData.
     static ReadDiskData() {
-        return ConfigReadStrict("KeyRemaps", ConfigReadKeyRemaps)
+        return ConfigReadForSave("KeyRemaps", ConfigReadKeyRemaps)
     }
 
-    TakeDiskData(remaps) {
-        this.localData := remaps
-        this.lastGood := ConfigCloneData(remaps)
+    ; result: { Data, Fingerprint } from ReadDiskData. diskFingerprint is what
+    ; the next save passes on, to be refused if the file holds another list.
+    TakeDiskData(result) {
+        this.localData := result.Data
+        this.lastGood := ConfigCloneData(result.Data)
+        this.diskFingerprint := result.Fingerprint
         this.readOk := true
     }
 
@@ -169,14 +176,16 @@ class KeyRemapManager {
     ; memory — so without this, edits made to the file meanwhile (App Info's
     ; Open buttons invite exactly that) are overwritten by the stale snapshot.
     ReloadFromDisk() {
+        if this.isEditingPopup
+            return
         ; A file that cannot be read keeps the list shown and blocks saving it;
         ; the dashboard reports the error.
-        try remaps := KeyRemapManager.ReadDiskData()
+        try result := KeyRemapManager.ReadDiskData()
         catch ConfigReadError as err {
             this.readOk := false
             throw err
         }
-        this.TakeDiskData(remaps)
+        this.TakeDiskData(result)
     }
 
     RefreshList(targetIdx := 0) {
@@ -229,10 +238,12 @@ class KeyRemapManager {
     }
 
     ShowEditPopup(isEdit := false, editIdx := 0) {
+        this.isEditingPopup := true
         WinSetEnabled(0, this.mainHwnd)
         popup := Gui("+AlwaysOnTop +Owner" . this.mainHwnd . " -MinimizeBox -MaximizeBox", isEdit ? "Modify Key Mapping" : "Add Key Mapping")
 
         CleanUpAndClose() {
+            this.isEditingPopup := false
             WinSetEnabled(1, this.mainHwnd)
             WinActivate(this.mainHwnd)
             popup.Destroy()
@@ -407,8 +418,14 @@ class KeyRemapManager {
                 this.localData.Push({ Src: src, Dst: dst })
             }
 
-            if !this.SaveSettings(false)
+            if !this.SaveSettings(false) {
+                ; The list was read again and differs: an edit's row number
+                ; may now be another entry's. A new entry has none, so its
+                ; popup stays open with the text typed.
+                if (this.saveConflict && isEdit)
+                    CleanUpAndClose()
                 return
+            }
             this.RefreshList(isEdit ? editIdx : this.localData.Length)
             CleanUpAndClose()
             this.ShowAutoSaveFeedback(isEdit ? "✅ Mapping saved and applied" : "✅ Mapping added and applied")
@@ -433,6 +450,8 @@ class KeyRemapManager {
     ; applyWarning for the feedback that follows.
     SaveSettings(showFeedback := true) {
         this.applyWarning := ""
+        ; saveConflict: the last save was refused because the file changed.
+        this.saveConflict := false
         if !this.readOk {
             this.localData := ConfigCloneData(this.lastGood)
             this.RefreshList()
@@ -440,21 +459,35 @@ class KeyRemapManager {
             return false
         }
         try {
-            ConfigWriteKeyRemaps(this.localData)
-            this.lastGood := ConfigCloneData(this.localData)
+            written := ConfigWriteKeyRemaps(this.localData, this.diskFingerprint)
         } catch Error as err {
-            ; The file is unchanged: show it again, or, if it cannot be read
-            ; either, the list last known to be on it.
+            ; The file is unchanged by this save: show it as it is now, or, if
+            ; it cannot be read either, the list last known to be on it.
+            ; Whatever failed, a list that reads differently now counts as a
+            ; conflict, so an edit popup does not keep a stale row number.
+            previousFingerprint := this.diskFingerprint
+            reloaded := true
             try this.TakeDiskData(KeyRemapManager.ReadDiskData())
             catch {
+                reloaded := false
                 this.localData := ConfigCloneData(this.lastGood)
                 this.readOk := false
             }
+            this.saveConflict := (err is ConfigChangedError) || (reloaded && this.diskFingerprint !== previousFingerprint)
             this.RefreshList()
-            MsgBox("❌ The key mapping change could not be saved and was not applied.`n`nError: " . err.Message,
-                "Save Failed", 262160)
+            if (reloaded && this.saveConflict)
+                ConfigReportChangedOutside()
+            else
+                MsgBox("❌ The key mapping change could not be saved and was not applied.`n`nError: " . err.Message,
+                    "Save Failed", 262160)
             return false
         }
+        ; What the file now holds, from the copy that became it: reading the
+        ; file again could take a change made since for this save's own. The
+        ; list on screen becomes what was written, which can differ slightly.
+        try this.localData := ConfigReadParsed(Map("KeyRemaps", written.Parsed), ConfigReadKeyRemaps)
+        this.lastGood := ConfigCloneData(this.localData)
+        this.diskFingerprint := written.Fingerprint
 
         try {
             failedItems := LoadKeyRemaps(false)

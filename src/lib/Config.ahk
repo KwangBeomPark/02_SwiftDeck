@@ -101,6 +101,106 @@ ConfigReadParsed(parsedByName, reader) {
     }
 }
 
+; A list save refused because its file changed, or disappeared, after the
+; settings tab read it: saving would have put the older list over the change.
+class ConfigChangedError extends Error {
+}
+
+; The sections a list save rewrites, as parsed reads them. A settings tab
+; keeps this from its last read and the save compares it with the file, so
+; sections the save does not touch (slot names, the manual language, Meta)
+; can change meanwhile without the save being refused.
+ConfigListFingerprint(parsed, configName) {
+    ; Never empty, since "" means "no check" to the writers: a hotstring file
+    ; holding only [Meta] has no other section to show.
+    text := configName . "`n"
+    names := []
+    switch configName {
+        case "Prompts":
+            loop 10
+                names.Push("Numpad" . (A_Index - 1))
+            ; Decides how the slots read, and the save writes it.
+            text .= "PromptEncoding=" . IniTextReadValue(parsed, "Meta", "PromptEncoding", Chr(0x1F)) . "`n"
+        case "Folders":
+            names.Push("FolderMenu")
+        case "KeyRemaps":
+            names.Push("Remaps")
+        case "Hotstrings":
+            ; Decides which reader applies, and the save writes it.
+            text .= "SchemaVersion=" . IniTextReadValue(parsed, "Meta", "SchemaVersion", Chr(0x1F)) . "`n"
+            ; The hotstring save replaces every section but Meta.
+            seen := Map()
+            seen.CaseSense := "Off"
+            for name in parsed.Names {
+                if (name != "Meta" && !seen.Has(name)) {
+                    seen[name] := true
+                    names.Push(name)
+                }
+            }
+        default:
+            throw ValueError("No list fingerprint for the settings file " . configName)
+    }
+    for name in names
+        text .= "[" . name . "]`n" . IniTextReadSection(parsed, name, Chr(0x1F)) . "`n"
+    return text
+}
+
+; A strict read for a settings tab: { Data: reader(), Fingerprint }, both from
+; one read of the file.
+ConfigReadForSave(configName, reader) {
+    parsed := IniParseText(ConfigReadFileText(GetConfigPath(configName)))
+    data := ConfigReadParsed(Map(configName, parsed), reader)
+    return { Data: data, Fingerprint: ConfigListFingerprint(parsed, configName) }
+}
+
+; What a list writer hands SettingsWriteIniValues when the caller passed the
+; fingerprint of its last read: the copy about to be changed must still hold
+; that list, or the save is refused with ConfigChangedError.
+; The first call checks the copy against the list; the second, on the file
+; itself right before the swap, wants the whole file unchanged since the copy:
+; the swap would also undo a change to a section this list does not cover.
+ConfigCheckUnchanged(configName, expectedFingerprint) {
+    calls := 0
+    copiedText := ""
+    Check(path, existed) {
+        calls += 1
+        if !existed
+            throw ConfigChangedError("The settings file was removed after this list was read.")
+        text := ConfigReadFileText(path)
+        if (calls == 1) {
+            if (ConfigListFingerprint(IniParseText(text), configName) !== expectedFingerprint)
+                throw ConfigChangedError("The settings file was changed outside this window after this list was read.")
+            copiedText := text
+        } else if (text !== copiedText) {
+            throw ConfigChangedError("The settings file was changed outside this window while it was being saved.")
+        }
+    }
+    return Check
+}
+
+; What a list writer hands SettingsWriteIniValues as describe: { Fingerprint,
+; Parsed } of the finished copy, read just before it becomes the file.
+ConfigDescribeWritten(configName) {
+    Describe(copyPath) {
+        parsed := IniParseText(ConfigReadFileText(copyPath))
+        return { Fingerprint: ConfigListFingerprint(parsed, configName), Parsed: parsed }
+    }
+    return Describe
+}
+
+; The base check for a writer, or none when no fingerprint was passed.
+ConfigSaveCheck(configName, expectedFingerprint) {
+    return (expectedFingerprint != "") ? ConfigCheckUnchanged(configName, expectedFingerprint) : ""
+}
+
+; Shown when a settings tab's save was refused by ConfigCheckUnchanged and the
+; tab has read the file again.
+ConfigReportChangedOutside() {
+    MsgBox("⚠️ The settings file was changed outside this window after it was loaded (for example in a "
+        . "text editor or by a sync program), so this change was not saved.`n`nThe list now shows the "
+        . "file as it is. Please make the change again.", "Settings Changed", 262192)
+}
+
 ; A deep copy of what the readers return (Maps, Arrays and plain objects), so a
 ; settings tab can keep its last list that was read intact.
 ConfigCloneData(value) {
@@ -758,12 +858,14 @@ ConfigReadFolderItems() {
     return items
 }
 
-ConfigWriteFolderItems(items) {
+; expectedFingerprint: see ConfigCheckUnchanged; "" skips the check.
+ConfigWriteFolderItems(items, expectedFingerprint := "") {
     content := ""
     for item in items {
         content .= item.Name . "=" . item.Path . "`n"
     }
-    ConfigWriteSection("Folders", "FolderMenu", content)
+    return SettingsWriteIniValues(GetConfigPath("Folders"), [{ Section: "FolderMenu", SectionText: content }],
+        ConfigSaveCheck("Folders", expectedFingerprint), ConfigDescribeWritten("Folders"))
 }
 
 ConfigReadPromptData() {
@@ -911,14 +1013,15 @@ ConfigCheckPromptSlotLimit(items) {
 }
 
 ; slotNames, when given (a catalog switch), replaces [SlotNames] in the same write.
-ConfigWritePromptData(promptData, slotNames := "") {
+ConfigWritePromptData(promptData, slotNames := "", expectedFingerprint := "") {
     ; All slots and the marker go in one atomic write (SettingsWriteIniValues),
     ; so a locked or cloud-synced file refuses the save whole instead of keeping
     ; some slots rewritten.
     changes := ConfigBuildPromptChanges(promptData)
     if (slotNames is Map)
         changes.Push({ Section: "SlotNames", SectionText: ConfigBuildSlotNamesText(slotNames) })
-    SettingsWriteIniValues(GetConfigPath("Prompts"), changes)
+    return SettingsWriteIniValues(GetConfigPath("Prompts"), changes, ConfigSaveCheck("Prompts", expectedFingerprint),
+        ConfigDescribeWritten("Prompts"))
 }
 
 ; The changes that store promptData, shared by the prompt save and catalog files.
@@ -1148,13 +1251,14 @@ ConfigReadHotstringDataLegacy() {
     return { Data: localData, GroupOrder: groupOrder }
 }
 
-ConfigWriteHotstringData(localData, groupOrder) {
+ConfigWriteHotstringData(localData, groupOrder, expectedFingerprint := "") {
     ; Every section is replaced in one atomic write (SettingsWriteIniValues), so
     ; a failure cannot leave the old groups deleted and the new ones unwritten.
     changes := [{ ClearSectionsExcept: ["Meta"] }]
     for change in ConfigBuildHotstringChanges(localData, groupOrder)
         changes.Push(change)
-    SettingsWriteIniValues(GetConfigPath("Hotstrings"), changes)
+    return SettingsWriteIniValues(GetConfigPath("Hotstrings"), changes, ConfigSaveCheck("Hotstrings", expectedFingerprint),
+        ConfigDescribeWritten("Hotstrings"))
 }
 
 ; The sections that store the groups, shared by the hotstring save and catalog
@@ -1406,12 +1510,13 @@ ConfigReadKeyRemaps() {
     return remaps
 }
 
-ConfigWriteKeyRemaps(remaps) {
+ConfigWriteKeyRemaps(remaps, expectedFingerprint := "") {
     content := ""
     for item in remaps {
         content .= item.Src . "=" . item.Dst . "`n"
     }
-    ConfigWriteSection("KeyRemaps", "Remaps", content)
+    return SettingsWriteIniValues(GetConfigPath("KeyRemaps"), [{ Section: "Remaps", SectionText: content }],
+        ConfigSaveCheck("KeyRemaps", expectedFingerprint), ConfigDescribeWritten("KeyRemaps"))
 }
 
 ConfigCountPairs(configName, section) {
